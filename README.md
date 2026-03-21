@@ -2,6 +2,32 @@
 
 A comprehensive GUI pocket calculator written in Python using tkinter that performs basic arithmetic operations and advanced trigonometric/hyperbolic functions.
 
+## Platforms
+
+- **Desktop:** `fx-451m-calculator.py` (tkinter-based)
+- **Android:** `android_calculator.py` (Kivy-based mobile app)
+
+## Building Android APK
+
+For detailed Android build instructions, see [README_Android.md](README_Android.md).
+
+**Quick Build (Windows):**
+```bash
+# Run the build script
+build_apk.bat
+```
+
+**Manual Build:**
+```bash
+# Install buildozer
+pip install buildozer
+
+# Build debug APK
+buildozer android debug
+```
+
+The APK will be created in the `bin/` directory and can be installed on Android devices via APK installer.
+
 ## Features
 
 - **Basic Arithmetic:**
