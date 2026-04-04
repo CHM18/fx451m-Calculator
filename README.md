@@ -11,6 +11,13 @@ A comprehensive GUI pocket calculator written in Python using tkinter that perfo
 
 For detailed Android build instructions, see [README_Android.md](README_Android.md).
 
+On Windows, you can provision Java and the Android SDK with:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+.\scripts\setup-android-toolchain.ps1
+```
+
 **Quick Build (Windows):**
 ```bash
 # Run the build script

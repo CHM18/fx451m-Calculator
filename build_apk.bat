@@ -1,38 +1,36 @@
 @echo off
-echo Building fx451m-Calculator Android APK...
+setlocal
+
+echo Setting up Android toolchain for fx451m-Calculator...
 echo.
 
-REM Check if buildozer is installed
-buildozer version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Error: buildozer is not installed.
-    echo Please install it with: pip install buildozer
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\setup-android-toolchain.ps1"
+if errorlevel 1 (
+    echo.
+    echo Android toolchain setup failed.
     pause
     exit /b 1
 )
 
-echo Starting APK build process...
-echo This may take several minutes on first run (downloading Android SDK/NDK)...
+echo.
+echo Building Android APK with Flet...
 echo.
 
-buildozer android debug
-
-if %errorlevel% equ 0 (
-    echo.
-    echo Build completed successfully!
-    echo APK location: bin\fx451mcalculator-1.0.0-debug.apk
-    echo.
-    echo To install on Android device:
-    echo 1. Enable "Unknown Sources" in Settings ^> Security
-    echo 2. Transfer the APK to your device
-    echo 3. Open the APK file and install
-) else (
-    echo.
-    echo Build failed. Check the output above for errors.
-    echo Common solutions:
-    echo - Delete .buildozer directory and try again
-    echo - Ensure you have JDK 8+ installed
-    echo - Check available disk space (need ~5GB)
+set "FLET_CMD=flet"
+if exist "%~dp0.venv\Scripts\flet.exe" (
+    set "FLET_CMD=%~dp0.venv\Scripts\flet.exe"
 )
 
+call "%FLET_CMD%" build apk
+if errorlevel 1 (
+    echo.
+    echo APK build failed. Review the output above for the failing tool or package.
+    echo If needed, rerun scripts\setup-android-toolchain.ps1 -Force and try again.
+    pause
+    exit /b 1
+)
+
+echo.
+echo Build completed successfully.
+echo APK output: build\apk\
 pause
