@@ -1,7 +1,6 @@
 # fx451m-Calculator Android App
 
-This is the Android version of the fx451m-Calculator, built with **Flet** (Python).
-It also runs on desktop (Windows/Mac/Linux) — the same `main.py` is used everywhere.
+This app is built with Flet and uses `main.py` as the single entry point for desktop and Android.
 
 ## Features
 
@@ -28,7 +27,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 .\scripts\setup-android-toolchain.ps1
 ```
 
-The script installs a user-scoped JDK 17 and Android SDK, sets `JAVA_HOME`, `ANDROID_HOME`, and `ANDROID_SDK_ROOT`, updates the user `Path`, installs `platform-tools`, `platforms;android-35`, `build-tools;35.0.0`, and accepts SDK licenses.
+The script installs a user-scoped JDK 17 and Android SDK, sets `JAVA_HOME`, `ANDROID_HOME`, and `ANDROID_SDK_ROOT`, updates the user `Path`, installs the required Android SDK components, and accepts SDK licenses.
 
 ## Run on Desktop
 
@@ -91,9 +90,10 @@ flet build apk --no-rich-output
 ```
 fx451m-Calculator/
 ├── main.py                 # Flet app (desktop + Android)
-├── requirements.txt        # Dependencies (flet only)
-├── fx-451m-Calculator.py   # Original tkinter desktop version
-├── README_Android.md       # This file
+├── requirements.txt        # Python dependencies
+├── scripts/
+│   └── setup-android-toolchain.ps1
+├── README_Android.md       # Android build notes
 └── README.md
 ```
 
