@@ -11,8 +11,8 @@ import flet as ft
 def main(page: ft.Page):
     page.title = "fx451m Calculator"
     page.window.width = 420
-    page.window.height = 720
-    page.padding = 10
+    page.window.height = 772
+    page.padding = 0
     page.bgcolor = ft.Colors.WHITE
 
     # --- Calculator state ---
@@ -30,19 +30,86 @@ def main(page: ft.Page):
         "sinh", "cosh", "tanh", "coth",
         "asinh", "acosh", "atanh", "acoth",
     }
+    EXTRA_UNARY_FUNCS = {"1/x", "sqrt", "x^2"}
+    CONSTANTS = {
+        "CONST_PI": math.pi,
+        "CONST_C": 299792458,
+        "CONST_H": 6.62607015e-34,
+        "CONST_G": 6.67430e-11,
+    }
+    MAX_DIGITS = 12
+
+    def digit_count(value):
+        return sum(1 for char in value if char.isdigit())
+
+    def format_number(value):
+        if value == 0:
+            return "0"
+        return f"{value:.12g}"
+
+    def split_display_value(value):
+        if not value or value == "0":
+            return "0", ""
+        if value == "Error":
+            return "Error", ""
+        if "e" not in value.lower():
+            return value, ""
+
+        mantissa, exponent = value.lower().split("e", 1)
+        exponent_value = int(exponent)
+        if exponent_value < 0:
+            exponent_text = f"-{abs(exponent_value):03d}"
+        else:
+            exponent_text = f"{exponent_value:03d}"
+        return mantissa, exponent_text
 
     # --- Display ---
-    display = ft.TextField(
+    mantissa_display = ft.Text(
         value="0",
-        text_align=ft.TextAlign.RIGHT,
-        text_size=28,
-        read_only=True,
-        filled=True,
-        border_radius=8,
+        text_align=ft.TextAlign.CENTER,
+        size=34,
+        weight=ft.FontWeight.BOLD,
+        color=ft.Colors.BLACK,
+    )
+
+    exponent_display = ft.Text(
+        value="",
+        text_align=ft.TextAlign.LEFT,
+        size=16,
+        weight=ft.FontWeight.BOLD,
+        color=ft.Colors.BLACK,
+    )
+
+    display = ft.Row(
+        [
+            ft.Container(content=mantissa_display, alignment=ft.Alignment(1, 0), expand=True),
+            ft.Container(
+                content=exponent_display,
+                width=34,
+                alignment=ft.Alignment(-1, -1),
+                padding=ft.padding.only(top=6),
+            ),
+        ],
+        alignment=ft.MainAxisAlignment.CENTER,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+        spacing=0,
+    )
+
+    display_card = ft.Container(
+        content=display,
+        alignment=ft.Alignment(0, 0),
+        padding=ft.padding.symmetric(horizontal=8, vertical=6),
+        bgcolor=ft.Colors.GREY_100,
+        border=ft.border.all(6, ft.Colors.BROWN_400),
+        border_radius=12,
+        height=74,
+        margin=ft.margin.only(bottom=14),
     )
 
     def update_display():
-        display.value = state["current"] if state["current"] else "0"
+        mantissa, exponent = split_display_value(state["current"] if state["current"] else "0")
+        mantissa_display.value = mantissa
+        exponent_display.value = exponent
         page.update()
 
     def clear():
@@ -54,6 +121,17 @@ def main(page: ft.Page):
 
     def clear_entry():
         state["current"] = ""
+        update_display()
+
+    def toggle_sign():
+        current = state["current"]
+        if not current or current == "Error":
+            return
+        if current.startswith("-"):
+            state["current"] = current[1:]
+        else:
+            if current != "0":
+                state["current"] = f"-{current}"
         update_display()
 
     # --- Math helpers ---
@@ -68,6 +146,21 @@ def main(page: ft.Page):
             if b == 0:
                 raise ValueError("Division by zero")
             return a / b
+        elif op == "^":
+            return a ** b
+
+    def calc_extra_unary(x, func):
+        if func == "1/x":
+            if x == 0:
+                raise ValueError("Division by zero")
+            return 1 / x
+        elif func == "sqrt":
+            if x < 0:
+                raise ValueError("Domain error")
+            return math.sqrt(x)
+        elif func == "x^2":
+            return x * x
+        raise ValueError(f"Unknown function: {func}")
 
     def calc_unary(x, func):
         trig_direct = {"sin", "cos", "tan", "cot"}
@@ -138,31 +231,52 @@ def main(page: ft.Page):
         if char is None:
             return
 
-        if char.isdigit() or char == "." or char == "π":
-            if state["last_was_equals"] and (char.isdigit() or char == "π"):
+        if char.isdigit() or char == ".":
+            if state["last_was_equals"] and char.isdigit():
                 clear()
             state["last_was_equals"] = False
 
+            if state["current"] == "Error":
+                state["current"] = ""
+
             if char == "." and "." in state["current"]:
                 return
-            if char == "π":
-                state["current"] = str(math.pi)
-            else:
-                state["current"] += char
+            if char.isdigit() and digit_count(state["current"]) >= MAX_DIGITS:
+                return
+            state["current"] += char
             update_display()
 
-        elif char in ("+", "-", "*", "/"):
+        elif char in CONSTANTS:
+            if state["current"] == "Error":
+                state["current"] = ""
+            state["current"] = format_number(CONSTANTS[char])
+            state["last_was_equals"] = False
+            update_display()
+
+        elif char == "+/-":
+            toggle_sign()
+
+        elif char in ("+", "-", "*", "/", "^"):
             if state["current"]:
                 state["first"] = float(state["current"])
                 state["op"] = char
                 state["current"] = ""
                 state["last_was_equals"] = False
 
+        elif char in EXTRA_UNARY_FUNCS:
+            if state["current"]:
+                try:
+                    result = calc_extra_unary(float(state["current"]), char)
+                    state["current"] = format_number(result)
+                except (ValueError, ZeroDivisionError):
+                    state["current"] = "Error"
+                update_display()
+
         elif char in TRIG_FUNCS:
             if state["current"]:
                 try:
                     result = calc_unary(float(state["current"]), char)
-                    state["current"] = str(result)
+                    state["current"] = format_number(result)
                 except (ValueError, ZeroDivisionError):
                     state["current"] = "Error"
                 update_display()
@@ -173,7 +287,7 @@ def main(page: ft.Page):
                     result = calc_binary(
                         state["first"], float(state["current"]), state["op"]
                     )
-                    state["current"] = str(result)
+                    state["current"] = format_number(result)
                     state["op"] = ""
                     state["last_was_equals"] = True
                 except (ValueError, ZeroDivisionError):
@@ -190,19 +304,80 @@ def main(page: ft.Page):
             clear_entry()
 
     # --- Mode toggle ---
-    mode_label = ft.Text("Mode: Rad", size=16, weight=ft.FontWeight.BOLD)
+    mode_rad_label = ft.Text("Rad", size=11, weight=ft.FontWeight.BOLD)
+    mode_deg_label = ft.Text("Deg", size=11, weight=ft.FontWeight.BOLD)
+    mode_thumb = ft.Container(
+        width=22,
+        height=10,
+        border_radius=6,
+        bgcolor=ft.Colors.WHITE,
+        animate=ft.Animation(140, ft.AnimationCurve.EASE_IN_OUT),
+    )
+    mode_track = ft.Container(
+        content=ft.Row(
+            [mode_thumb],
+            alignment=ft.MainAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        width=52,
+        height=14,
+        border_radius=7,
+        bgcolor=ft.Colors.BLUE_200,
+        padding=ft.padding.symmetric(horizontal=3, vertical=2),
+    )
 
-    def on_mode_change(e):
-        state["mode"] = "Deg" if e.control.value else "Rad"
-        mode_label.value = f"Mode: {state['mode']}"
+    def refresh_mode_control():
+        is_deg = state["mode"] == "Deg"
+        mode_rad_label.color = ft.Colors.GREY_500 if is_deg else ft.Colors.BLACK
+        mode_deg_label.color = ft.Colors.BLACK if is_deg else ft.Colors.GREY_500
+        mode_track.content.alignment = (
+            ft.MainAxisAlignment.END if is_deg else ft.MainAxisAlignment.START
+        )
+
+    def toggle_mode(_):
+        state["mode"] = "Deg" if state["mode"] == "Rad" else "Rad"
+        refresh_mode_control()
         page.update()
 
-    mode_switch = ft.Switch(value=False, label="Deg", on_change=on_mode_change)
+    refresh_mode_control()
+
+    mode_control = ft.Container(
+        content=ft.Column(
+            [
+                ft.Row(
+                    [mode_rad_label, mode_deg_label],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                ),
+                ft.Container(
+                    content=mode_track,
+                    alignment=ft.Alignment(0, 1),
+                    expand=True,
+                ),
+            ],
+            spacing=1,
+        ),
+        on_click=toggle_mode,
+        alignment=ft.Alignment(0, 0),
+        expand=True,
+        height=48,
+        bgcolor=ft.Colors.GREY_200,
+        border_radius=6,
+        padding=ft.padding.only(left=5, top=2, right=5, bottom=3),
+    )
 
     # --- Button factory ---
     def btn(label, data=None, bgcolor=None, color=None, text_size=14):
         return ft.Button(
-            content=ft.Text(label, size=text_size),
+            content=ft.Container(
+                content=ft.Text(
+                    label,
+                    size=text_size,
+                    text_align=ft.TextAlign.CENTER,
+                    no_wrap=True,
+                ),
+                alignment=ft.Alignment(0, 0),
+                padding=ft.padding.symmetric(horizontal=3, vertical=2),
+            ),
             data=data if data is not None else label,
             on_click=on_click,
             expand=True,
@@ -211,6 +386,7 @@ def main(page: ft.Page):
                 bgcolor=bgcolor or ft.Colors.GREY_200,
                 color=color or ft.Colors.BLACK,
                 shape=ft.RoundedRectangleBorder(radius=6),
+                padding=ft.padding.all(0),
             ),
         )
 
@@ -220,25 +396,29 @@ def main(page: ft.Page):
 
     # --- Layout ---
     page.add(
-        ft.Column(
-            expand=True,
-            spacing=4,
-            controls=[
-                display,
-                ft.Row([mode_label, mode_switch]),
-                # Trig
-                ft.Row([btn("sin"), btn("cos"), btn("tan"), btn("cot")]),
-                ft.Row([btn("asin"), btn("acos"), btn("atan"), btn("acot")]),
-                # Hyperbolic
-                ft.Row([btn("sinh"), btn("cosh"), btn("tanh"), btn("coth")]),
-                ft.Row([btn("asinh"), btn("acosh"), btn("atanh"), btn("acoth")]),
-                # Numbers & operators
-                ft.Row([btn("7", text_size=20), btn("8", text_size=20), btn("9", text_size=20), btn("/", bgcolor=OP_BG, text_size=20)]),
-                ft.Row([btn("4", text_size=20), btn("5", text_size=20), btn("6", text_size=20), btn("*", bgcolor=OP_BG, text_size=20)]),
-                ft.Row([btn("1", text_size=20), btn("2", text_size=20), btn("3", text_size=20), btn("-", bgcolor=OP_BG, text_size=20)]),
-                ft.Row([btn("0", text_size=20), btn(".", text_size=20), btn("=", bgcolor=EQ_BG, text_size=20), btn("+", bgcolor=OP_BG, text_size=20)]),
-                ft.Row([btn("C", bgcolor=CLR_BG), btn("CE", bgcolor=CLR_BG), btn("π", data="π")]),
-            ],
+        ft.SafeArea(
+            minimum_padding=ft.padding.only(left=10, top=36, right=10, bottom=12),
+            content=ft.Column(
+                expand=True,
+                spacing=6,
+                controls=[
+                    display_card,
+                    ft.Row([mode_control, btn("+/-", text_size=11), btn("C", bgcolor=CLR_BG), btn("CE", bgcolor=CLR_BG)]),
+                    # Numbers & operators
+                    ft.Row([btn("7", text_size=20), btn("8", text_size=20), btn("9", text_size=20), btn("/", bgcolor=OP_BG, text_size=20)]),
+                    ft.Row([btn("4", text_size=20), btn("5", text_size=20), btn("6", text_size=20), btn("*", bgcolor=OP_BG, text_size=20)]),
+                    ft.Row([btn("1", text_size=20), btn("2", text_size=20), btn("3", text_size=20), btn("-", bgcolor=OP_BG, text_size=20)]),
+                    ft.Row([btn("0", text_size=20), btn(".", text_size=20), btn("=", bgcolor=EQ_BG, text_size=20), btn("+", bgcolor=OP_BG, text_size=20)]),
+                    ft.Row([btn("1/x"), btn("sqrt"), btn("x^2"), btn("x^y", data="^")]),
+                    # Trig
+                    ft.Row([btn("sin"), btn("cos"), btn("tan"), btn("cot")]),
+                    ft.Row([btn("asin"), btn("acos"), btn("atan"), btn("acot")]),
+                    # Hyperbolic
+                    ft.Row([btn("sinh"), btn("cosh"), btn("tanh"), btn("coth")]),
+                    ft.Row([btn("asinh"), btn("acosh"), btn("atanh"), btn("acoth")]),
+                    ft.Row([btn("Pi", data="CONST_PI"), btn("c", data="CONST_C"), btn("h", data="CONST_H"), btn("G", data="CONST_G")]),
+                ],
+            ),
         )
     )
 
