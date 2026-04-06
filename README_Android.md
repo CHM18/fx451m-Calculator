@@ -43,6 +43,12 @@ pip install flet
 flet build apk
 ```
 
+To regenerate the app icon artwork before building:
+
+```bash
+python scripts/generate_icon.py
+```
+
 If you want to rebuild the local toolchain from scratch, rerun the PowerShell script with `-Force`.
 
 The APK will appear in the `build/apk/` folder.

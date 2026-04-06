@@ -8,6 +8,255 @@ import math
 import flet as ft
 
 
+BASE_SYSTEMS = {"DEC": 10, "BIN": 2, "OCT": 8, "HEX": 16}
+BASE_BINARY_OPS = {"AND", "OR", "XOR", "XNOR"}
+BINARY_OPS = {"+", "-", "*", "/", "^", *BASE_BINARY_OPS}
+OP_PRECEDENCE = {
+    "OR": 1,
+    "XOR": 2,
+    "XNOR": 2,
+    "AND": 3,
+    "+": 4,
+    "-": 4,
+    "*": 5,
+    "/": 5,
+    "^": 6,
+}
+BASE_WORD_BITS = 32
+BASE_WORD_MASK = (1 << BASE_WORD_BITS) - 1
+MAX_DIGITS = 12
+BASE_DISPLAY_LIMITS = {"BIN": 32, "OCT": 10, "DEC": 10, "HEX": 8}
+BASE_FORMAT_BITS = {"BIN": 32, "OCT": 30, "DEC": 32, "HEX": 32}
+MAX_EXPONENT_DIGITS = 3
+
+
+def count_digits(value):
+    return sum(1 for char in value if char.isdigit())
+
+
+def format_decimal_number(value):
+    if value == 0:
+        return "0"
+    return f"{value:.12g}"
+
+
+def normalize_base_value(value):
+    return int(value) & BASE_WORD_MASK
+
+
+def get_base_format_bits(base_name):
+    return BASE_FORMAT_BITS[base_name]
+
+
+def normalize_base_value_for_format(value, base_name):
+    bit_count = get_base_format_bits(base_name)
+    mask = (1 << bit_count) - 1
+    return int(value) & mask
+
+
+def signed_from_base_word(value):
+    normalized = normalize_base_value(value)
+    sign_bit = 1 << (BASE_WORD_BITS - 1)
+    if normalized & sign_bit:
+        return normalized - (1 << BASE_WORD_BITS)
+    return normalized
+
+
+def format_base_value(value, base_name, max_digits=None):
+    base_value = BASE_SYSTEMS[base_name]
+    unsigned_value = normalize_base_value_for_format(value, base_name)
+    if unsigned_value == 0:
+        result = "0"
+    else:
+        digits = "0123456789ABCDEF"
+        parts = []
+        while unsigned_value > 0:
+            unsigned_value, remainder = divmod(unsigned_value, base_value)
+            parts.append(digits[remainder])
+        result = "".join(reversed(parts))
+
+    if max_digits is not None and len(result) > max_digits:
+        raise OverflowError("Base display overflow")
+    return result
+
+
+def get_base_display_limit(base_name):
+    return BASE_DISPLAY_LIMITS[base_name]
+
+
+def parse_base_value(text, base_name):
+    cleaned = (text or "").strip().upper()
+    if cleaned == "":
+        raise ValueError("Incomplete base input")
+    raw_value = int(cleaned, BASE_SYSTEMS[base_name])
+    bit_count = get_base_format_bits(base_name)
+    mask = (1 << bit_count) - 1
+    normalized = raw_value & mask
+
+    if base_name == "OCT":
+        sign_bit = 1 << (bit_count - 1)
+        if normalized & sign_bit:
+            extension_mask = BASE_WORD_MASK ^ mask
+            normalized |= extension_mask
+
+    return normalize_base_value(normalized)
+
+
+def split_binary_rows(text):
+    if text == "Error":
+        return "", "Error"
+    padded = (text or "0").rjust(get_base_display_limit("BIN"), "0")
+    if len(padded) > get_base_display_limit("BIN"):
+        raise OverflowError("Binary display overflow")
+    return padded[:16], padded[16:]
+
+
+def parse_scientific_parts(value):
+    if not value or value == "Error":
+        return value, ""
+    if "e" not in value.lower():
+        return value, ""
+    mantissa, exponent = value.lower().split("e", 1)
+    return mantissa, exponent
+
+
+def compose_scientific_parts(mantissa, exponent):
+    if exponent in ("", None):
+        return mantissa
+    return f"{mantissa}e{exponent}"
+
+
+def toggle_exponent_mode(current, editing_exponent):
+    if not current or current == "Error":
+        return current, editing_exponent
+    if editing_exponent:
+        return current, False
+    mantissa, exponent = parse_scientific_parts(current)
+    return compose_scientific_parts(mantissa, exponent or "0"), True
+
+
+def append_exponent_digit_to_value(current, digit):
+    mantissa, exponent = parse_scientific_parts(current)
+    sign = "-" if exponent.startswith("-") else ""
+    digits = exponent.lstrip("-")
+    if digits == "0":
+        digits = ""
+    if len(digits) >= MAX_EXPONENT_DIGITS:
+        return current
+    digits += digit
+    return compose_scientific_parts(mantissa, f"{sign}{digits or '0'}")
+
+
+def append_mantissa_digit_to_value(current, char, max_digits=MAX_DIGITS):
+    if not current or current == "Error" or "e" not in current.lower():
+        return current, False
+
+    mantissa, exponent = parse_scientific_parts(current)
+
+    if char == ".":
+        if "." in mantissa:
+            return current, True
+        if mantissa == "":
+            mantissa = "0"
+        elif mantissa == "-":
+            mantissa = "-0"
+    else:
+        if mantissa == "0":
+            mantissa = ""
+        elif mantissa == "-0":
+            mantissa = "-"
+        if count_digits(mantissa) >= max_digits:
+            return current, True
+
+    mantissa += char
+    return compose_scientific_parts(mantissa, exponent), True
+
+
+def replace_last_operator(tokens, op):
+    updated_tokens = list(tokens)
+    replaced = bool(updated_tokens and updated_tokens[-1] in BINARY_OPS)
+    if replaced:
+        updated_tokens[-1] = op
+    else:
+        updated_tokens.append(op)
+    return updated_tokens, replaced
+
+
+def calc_binary_value(a, b, op, base_mode=False):
+    if op == "+":
+        return normalize_base_value(int(a) + int(b)) if base_mode else a + b
+    if op == "-":
+        return normalize_base_value(int(a) - int(b)) if base_mode else a - b
+    if op == "*":
+        return normalize_base_value(int(a) * int(b)) if base_mode else a * b
+    if op == "/":
+        if b == 0:
+            raise ValueError("Division by zero")
+        return normalize_base_value(int(int(a) / int(b))) if base_mode else a / b
+    if op == "^":
+        return normalize_base_value(int(a) ** int(b)) if base_mode else a ** b
+    if op == "AND":
+        return normalize_base_value(int(a) & int(b))
+    if op == "OR":
+        return normalize_base_value(int(a) | int(b))
+    if op == "XOR":
+        return normalize_base_value(int(a) ^ int(b))
+    if op == "XNOR":
+        return normalize_base_value(~(int(a) ^ int(b)))
+    raise ValueError(f"Unknown operator: {op}")
+
+
+def evaluate_expression_tokens(tokens, base_mode=False):
+    values = []
+    operators = []
+
+    def apply_top_operator():
+        if len(values) < 2 or not operators:
+            raise ValueError("Invalid expression")
+        op = operators.pop()
+        right = values.pop()
+        left = values.pop()
+        values.append(calc_binary_value(left, right, op, base_mode=base_mode))
+
+    for token in tokens:
+        if token == "(":
+            operators.append(token)
+        elif token == ")":
+            while operators and operators[-1] != "(":
+                apply_top_operator()
+            if not operators or operators[-1] != "(":
+                raise ValueError("Mismatched brackets")
+            operators.pop()
+        elif token in BINARY_OPS:
+            while operators and operators[-1] in BINARY_OPS:
+                top = operators[-1]
+                if OP_PRECEDENCE[top] > OP_PRECEDENCE[token] or (
+                    OP_PRECEDENCE[top] == OP_PRECEDENCE[token] and token != "^"
+                ):
+                    apply_top_operator()
+                else:
+                    break
+            operators.append(token)
+        else:
+            if isinstance(token, (int, float)):
+                values.append(token)
+            else:
+                values.append(float(token))
+
+    while operators:
+        if operators[-1] == "(":
+            raise ValueError("Mismatched brackets")
+        apply_top_operator()
+
+    if len(values) != 1:
+        raise ValueError("Invalid expression")
+    return values[0]
+
+
+def convert_base_text_to_signed_decimal_text(text, base_name):
+    return format_decimal_number(signed_from_base_word(parse_base_value(text, base_name)))
+
+
 def main(page: ft.Page):
     page.title = "fx451m Calculator"
     page.window.width = 420
@@ -26,6 +275,7 @@ def main(page: ft.Page):
         "has_memory": False,
         "mode": "Rad",
         "base_mode": "Normal",
+        "base_format": "DEC",
         "editing_exponent": False,
         "replace_on_next_input": False,
         "last_was_equals": False,
@@ -44,30 +294,140 @@ def main(page: ft.Page):
         "CONST_H": 6.62607015e-34,
         "CONST_G": 6.67430e-11,
     }
-    BINARY_OPS = {"+", "-", "*", "/", "^"}
-    OP_PRECEDENCE = {"+": 1, "-": 1, "*": 2, "/": 2, "^": 3}
-    MAX_DIGITS = 12
-
+    NORMAL_FUNCTION_LAYOUT = [
+        ["sin", "cos", "tan", "cot"],
+        ["asin", "acos", "atan", "acot"],
+        ["sinh", "cosh", "tanh", "coth"],
+        ["asinh", "acosh", "atanh", "acoth"],
+    ]
+    BASE_FUNCTION_LAYOUT = [
+        ["DEC", "BIN", "OCT", "HEX"],
+        ["NEG", "A", "B", "C"],
+        ["NOT", "D", "E", "F"],
+        ["AND", "OR", "XOR", "XNOR"],
+    ]
     def digit_count(value):
-        return sum(1 for char in value if char.isdigit())
+        return count_digits(value)
 
     def format_number(value):
-        if value == 0:
-            return "0"
-        return f"{value:.12g}"
+        return format_decimal_number(value)
+
+    def is_base_mode_active():
+        return state["base_mode"] == "Base"
+
+    def normalize_base_word(value):
+        return normalize_base_value(value)
+
+    def base_word_to_signed(value):
+        return signed_from_base_word(value)
+
+    def get_active_base_name():
+        return state["base_format"]
+
+    def get_active_base_value():
+        return BASE_SYSTEMS[get_active_base_name()]
+
+    def format_result_value(value):
+        if is_base_mode_active():
+            return format_base_integer(normalize_base_word(value))
+        return format_number(value)
+
+    def format_base_integer(value, base_name=None):
+        base_name = base_name or get_active_base_name()
+        return format_base_value(value, base_name)
+
+    def parse_base_integer(text, base_name=None):
+        base_name = base_name or get_active_base_name()
+        return parse_base_value(text, base_name)
+
+    def convert_base_display(text, from_base, to_base):
+        if not text or text == "Error":
+            return text
+        return format_base_integer(parse_base_integer(text, from_base), to_base)
+
+    def current_numeric_value():
+        if is_base_mode_active():
+            return parse_base_integer(state["current"] or "0")
+        return float(state["current"])
+
+    def set_current_from_numeric(value):
+        if is_base_mode_active():
+            state["current"] = format_base_integer(normalize_base_word(value))
+        else:
+            state["current"] = format_number(value)
+
+    def can_use_current_display_value():
+        if not state["display_value"] or state["display_value"] == "Error":
+            return False
+        return True
+
+    def adopt_display_value_as_current():
+        if can_use_current_display_value() and not can_push_current():
+            state["current"] = state["display_value"]
+            state["display_value"] = ""
+            state["replace_on_next_input"] = False
+
+    def is_allowed_base_digit(char):
+        base_name = get_active_base_name()
+        if base_name == "BIN":
+            return char in "01"
+        if base_name == "OCT":
+            return char in "01234567"
+        if base_name == "DEC":
+            return char in "0123456789"
+        return char in "0123456789ABCDEF"
+
+    def base_input_count(value):
+        return sum(1 for char in value if char.isalnum())
+
+    def handle_base_digit_input(char):
+        char = char.upper()
+        if char == "." or not is_allowed_base_digit(char):
+            return
+
+        if state["replace_on_next_input"]:
+            state["current"] = ""
+            state["display_value"] = ""
+            state["replace_on_next_input"] = False
+
+        if state["last_was_equals"]:
+            clear()
+
+        if state["current"] == "Error":
+            state["current"] = ""
+
+        if state["current"] == "0":
+            state["current"] = ""
+        elif state["current"] == "-0":
+            state["current"] = "-"
+
+        if base_input_count(state["current"]) >= get_base_display_limit(get_active_base_name()):
+            return
+
+        state["current"] += char
+        state["display_value"] = ""
+        state["last_was_equals"] = False
+        update_display()
+
+    def change_base_format(new_base_name):
+        old_base_name = state["base_format"]
+        if old_base_name == new_base_name:
+            return
+
+        if state["current"] and state["current"] != "Error":
+            state["current"] = convert_base_display(state["current"], old_base_name, new_base_name)
+        if state["display_value"] and state["display_value"] != "Error":
+            state["display_value"] = convert_base_display(state["display_value"], old_base_name, new_base_name)
+
+        state["base_format"] = new_base_name
+        update_function_buttons()
+        update_display()
 
     def parse_scientific_value(value):
-        if not value or value == "Error":
-            return value, ""
-        if "e" not in value.lower():
-            return value, ""
-        mantissa, exponent = value.lower().split("e", 1)
-        return mantissa, exponent
+        return parse_scientific_parts(value)
 
     def compose_scientific_value(mantissa, exponent):
-        if exponent in ("", None):
-            return mantissa
-        return f"{mantissa}e{exponent}"
+        return compose_scientific_parts(mantissa, exponent)
 
     def split_display_value(value):
         if not value or value == "0":
@@ -102,12 +462,42 @@ def main(page: ft.Page):
         color=ft.Colors.BLACK,
     )
 
+    binary_display_text = ft.Text(
+        value="00000000000000000000000000000000",
+        text_align=ft.TextAlign.RIGHT,
+        size=16,
+        weight=ft.FontWeight.BOLD,
+        color=ft.Colors.BLACK,
+        no_wrap=True,
+        visible=True,
+    )
+
     exponent_display = ft.Text(
         value="",
         text_align=ft.TextAlign.LEFT,
         size=16,
         weight=ft.FontWeight.BOLD,
         color=ft.Colors.BLACK,
+    )
+
+    standard_display = ft.Row(
+        [
+            ft.Container(content=mantissa_display, alignment=ft.Alignment(1, 0), expand=True),
+            ft.Container(
+                content=exponent_display,
+                width=42,
+                alignment=ft.Alignment(-1, -0.75),
+            ),
+        ],
+        alignment=ft.MainAxisAlignment.CENTER,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=0,
+    )
+
+    binary_display = ft.Container(
+        content=binary_display_text,
+        alignment=ft.Alignment(1, 0),
+        visible=False,
     )
 
     display = ft.Row(
@@ -117,11 +507,15 @@ def main(page: ft.Page):
                 width=18,
                 alignment=ft.Alignment(-1, 0),
             ),
-            ft.Container(content=mantissa_display, alignment=ft.Alignment(1, 0), expand=True),
             ft.Container(
-                content=exponent_display,
-                width=42,
-                alignment=ft.Alignment(-1, -0.75),
+                expand=True,
+                content=ft.Stack(
+                    [
+                        ft.Container(content=standard_display, alignment=ft.Alignment(1, 0), expand=True),
+                        ft.Container(content=binary_display, alignment=ft.Alignment(1, 0), expand=True),
+                    ],
+                    expand=True,
+                ),
             ),
         ],
         alignment=ft.MainAxisAlignment.CENTER,
@@ -136,20 +530,40 @@ def main(page: ft.Page):
         bgcolor=ft.Colors.GREY_100,
         border=ft.border.all(6, ft.Colors.BROWN_400),
         border_radius=12,
-        width=352,
+        width=336,
         height=58,
     )
 
     def update_display():
         shown_value = state["display_value"] or state["current"] or "0"
-        mantissa, exponent = split_display_value(shown_value)
-        if state["editing_exponent"] and "e" not in (state["current"] or "").lower() and state["current"]:
-            exponent = "000"
-        mantissa_display.value = mantissa
-        exponent_display.value = exponent
+        if is_base_mode_active():
+            base_name = get_active_base_name()
+            display_limit = get_base_display_limit(base_name)
+            base_text = shown_value
+            if shown_value != "Error" and len(shown_value) > display_limit:
+                base_text = "Error"
+
+            if base_name == "BIN":
+                standard_display.visible = False
+                binary_display.visible = True
+                binary_display_text.value = base_text
+            else:
+                standard_display.visible = True
+                binary_display.visible = False
+                mantissa_display.value = base_text
+                exponent_display.value = ""
+        else:
+            mantissa, exponent = split_display_value(shown_value)
+            if state["editing_exponent"] and "e" not in (state["current"] or "").lower() and state["current"]:
+                exponent = "000"
+            standard_display.visible = True
+            binary_display.visible = False
+            mantissa_display.value = mantissa
+            exponent_display.value = exponent
         memory_indicator.visible = state["has_memory"]
         update_bracket_buttons()
         update_memory_buttons()
+        update_function_buttons()
         page.update()
 
     def get_open_bracket_count():
@@ -221,20 +635,17 @@ def main(page: ft.Page):
         update_display()
 
     def start_exponent_edit():
-        if not state["current"] or state["current"] == "Error":
+        updated_current, editing_exponent = toggle_exponent_mode(
+            state["current"], state["editing_exponent"]
+        )
+        if updated_current == state["current"] and editing_exponent == state["editing_exponent"]:
             return
-        if state["editing_exponent"]:
-            state["editing_exponent"] = False
-            state["display_value"] = ""
-            state["replace_on_next_input"] = False
-            update_display()
-            return
-        mantissa, exponent = parse_scientific_value(state["current"])
-        state["current"] = compose_scientific_value(mantissa, exponent or "0")
+        state["current"] = updated_current
         state["display_value"] = ""
-        state["editing_exponent"] = True
+        state["editing_exponent"] = editing_exponent
         state["replace_on_next_input"] = False
-        state["last_was_equals"] = False
+        if editing_exponent:
+            state["last_was_equals"] = False
         update_display()
 
     def append_exponent_digit(digit):
@@ -242,22 +653,23 @@ def main(page: ft.Page):
         if not current or current == "Error":
             return
 
-        mantissa, exponent = parse_scientific_value(current)
-        sign = "-" if exponent.startswith("-") else ""
-        digits = exponent.lstrip("-")
-        if digits == "0":
-            digits = ""
-        if len(digits) >= 3:
-            return
-        digits += digit
-        state["current"] = compose_scientific_value(mantissa, f"{sign}{digits or '0'}")
+        state["current"] = append_exponent_digit_to_value(current, digit)
         state["display_value"] = ""
         update_display()
+
+    def append_mantissa_digit(char):
+        updated_current, handled = append_mantissa_digit_to_value(state["current"], char)
+        if not handled:
+            return False
+        state["current"] = updated_current
+        state["display_value"] = ""
+        update_display()
+        return handled
 
     def recall_memory():
         if not state["has_memory"]:
             return
-        state["current"] = format_number(state["memory"])
+        set_current_from_numeric(state["memory"])
         state["display_value"] = ""
         state["editing_exponent"] = False
         state["replace_on_next_input"] = False
@@ -265,11 +677,11 @@ def main(page: ft.Page):
         update_display()
 
     def can_push_current():
-        return bool(state["current"] and state["current"] != "Error")
+        return bool(state["current"] and state["current"] not in {"Error", "-"})
 
     def push_current_token():
         if can_push_current():
-            state["tokens"].append(state["current"])
+            state["tokens"].append(current_numeric_value())
             state["current"] = ""
 
     def apply_top_operator(values, operators):
@@ -278,47 +690,17 @@ def main(page: ft.Page):
         op = operators.pop()
         right = values.pop()
         left = values.pop()
-        values.append(calc_binary(left, right, op))
+        values.append(calc_binary_value(left, right, op, base_mode=is_base_mode_active()))
 
     def evaluate_expression(tokens):
-        values = []
-        operators = []
-
-        for token in tokens:
-            if token == "(":
-                operators.append(token)
-            elif token == ")":
-                while operators and operators[-1] != "(":
-                    apply_top_operator(values, operators)
-                if not operators or operators[-1] != "(":
-                    raise ValueError("Mismatched brackets")
-                operators.pop()
-            elif token in BINARY_OPS:
-                while operators and operators[-1] in BINARY_OPS:
-                    top = operators[-1]
-                    if OP_PRECEDENCE[top] > OP_PRECEDENCE[token] or (
-                        OP_PRECEDENCE[top] == OP_PRECEDENCE[token] and token != "^"
-                    ):
-                        apply_top_operator(values, operators)
-                    else:
-                        break
-                operators.append(token)
-            else:
-                values.append(float(token))
-
-        while operators:
-            if operators[-1] == "(":
-                raise ValueError("Mismatched brackets")
-            apply_top_operator(values, operators)
-
-        if len(values) != 1:
-            raise ValueError("Invalid expression")
-        return values[0]
+        return evaluate_expression_tokens(tokens, base_mode=is_base_mode_active())
 
     def preview_for_operator(incoming_op):
         tokens = list(state["tokens"])
         if can_push_current():
-            tokens.append(state["current"])
+            tokens.append(current_numeric_value())
+        while tokens and tokens[-1] in BINARY_OPS:
+            tokens.pop()
         if not tokens:
             return state["current"] or "0"
 
@@ -344,7 +726,10 @@ def main(page: ft.Page):
                         break
                 operators.append(token)
             else:
-                values.append(float(token))
+                if isinstance(token, (int, float)):
+                    values.append(token)
+                else:
+                    values.append(float(token))
 
         while operators and operators[-1] in BINARY_OPS:
             top = operators[-1]
@@ -357,7 +742,7 @@ def main(page: ft.Page):
 
         if not values:
             return state["current"] or "0"
-        return format_number(values[-1])
+        return format_result_value(values[-1])
 
     def preview_for_closed_bracket():
         tokens = list(state["tokens"])
@@ -382,7 +767,59 @@ def main(page: ft.Page):
             return state["display_value"] or state["current"] or "0"
 
         inner_tokens.reverse()
-        return format_number(evaluate_expression(inner_tokens))
+        return format_result_value(evaluate_expression(inner_tokens))
+
+    def handle_base_unary(action):
+        adopt_display_value_as_current()
+        if not can_push_current():
+            return
+        try:
+            value = current_numeric_value()
+            if action == "NEG":
+                result = normalize_base_word(-value)
+            elif action == "NOT":
+                result = normalize_base_word(~value)
+            else:
+                return
+            set_current_from_numeric(result)
+            state["display_value"] = ""
+            state["replace_on_next_input"] = False
+            state["last_was_equals"] = False
+            update_display()
+        except ValueError:
+            state["current"] = "Error"
+            state["display_value"] = ""
+            update_display()
+
+    def handle_function_button(button_id):
+        index = int(button_id.split("_", 1)[1])
+        row = index // 4
+        column = index % 4
+        label = (BASE_FUNCTION_LAYOUT if is_base_mode_active() else NORMAL_FUNCTION_LAYOUT)[row][column]
+
+        if is_base_mode_active():
+            if label in BASE_SYSTEMS:
+                change_base_format(label)
+            elif label in {"A", "B", "C", "D", "E", "F"}:
+                handle_base_digit_input(label)
+            elif label in {"NEG", "NOT"}:
+                handle_base_unary(label)
+            elif label in BASE_BINARY_OPS:
+                handle_operator(label)
+            return
+
+        if label in TRIG_FUNCS:
+            if state["current"]:
+                try:
+                    result = calc_unary(float(state["current"]), label)
+                    state["current"] = format_number(result)
+                    state["display_value"] = ""
+                    state["editing_exponent"] = False
+                except (ValueError, ZeroDivisionError):
+                    state["current"] = "Error"
+                    state["display_value"] = ""
+                    state["editing_exponent"] = False
+                update_display()
 
     def handle_operator(op):
         if state["current"] == "Error":
@@ -395,7 +832,7 @@ def main(page: ft.Page):
             preview_value = preview_for_operator(op)
             push_current_token()
         elif state["tokens"] and state["tokens"][-1] in BINARY_OPS:
-            state["tokens"][-1] = op
+            state["tokens"], _ = replace_last_operator(state["tokens"], op)
             state["display_value"] = preview_for_operator(op)
             state["replace_on_next_input"] = True
             state["last_was_equals"] = False
@@ -418,7 +855,7 @@ def main(page: ft.Page):
         if state["current"] == "Error":
             return
         if can_push_current():
-            state["tokens"].append(state["current"])
+            state["tokens"].append(current_numeric_value())
             state["tokens"].append("*")
             state["current"] = ""
         elif state["tokens"] and state["tokens"][-1] == ")":
@@ -451,7 +888,7 @@ def main(page: ft.Page):
     def evaluate_pending_expression():
         tokens = list(state["tokens"])
         if can_push_current():
-            tokens.append(state["current"])
+            tokens.append(current_numeric_value())
         if not tokens:
             return
         if tokens[-1] in BINARY_OPS or tokens[-1] == "(":
@@ -461,7 +898,7 @@ def main(page: ft.Page):
         if open_count > close_count:
             tokens.extend(")" for _ in range(open_count - close_count))
         result = evaluate_expression(tokens)
-        state["current"] = format_number(result)
+        state["current"] = format_result_value(result)
         state["display_value"] = ""
         state["tokens"] = []
         state["op"] = ""
@@ -471,18 +908,7 @@ def main(page: ft.Page):
 
     # --- Math helpers ---
     def calc_binary(a, b, op):
-        if op == "+":
-            return a + b
-        elif op == "-":
-            return a - b
-        elif op == "*":
-            return a * b
-        elif op == "/":
-            if b == 0:
-                raise ValueError("Division by zero")
-            return a / b
-        elif op == "^":
-            return a ** b
+        return calc_binary_value(a, b, op, base_mode=is_base_mode_active())
 
     def calc_extra_unary(x, func):
         if func == "1/x":
@@ -566,6 +992,14 @@ def main(page: ft.Page):
         if char is None:
             return
 
+        if isinstance(char, str) and char.startswith("FUNC_"):
+            handle_function_button(char)
+            return
+
+        if is_base_mode_active() and (char.isdigit() or char in "ABCDEF" or char == "."):
+            handle_base_digit_input(char)
+            return
+
         if char.isdigit() or char == ".":
             if state["editing_exponent"]:
                 if char.isdigit():
@@ -591,6 +1025,8 @@ def main(page: ft.Page):
                 return
             if char == "." and state["current"] == "":
                 state["current"] = "0"
+            if append_mantissa_digit(char):
+                return
             if char.isdigit() and digit_count(state["current"]) >= MAX_DIGITS:
                 return
             state["current"] += char
@@ -604,21 +1040,28 @@ def main(page: ft.Page):
                 state["replace_on_next_input"] = False
             if state["current"] == "Error":
                 state["current"] = ""
-            state["current"] = format_number(CONSTANTS[char])
+            if is_base_mode_active():
+                state["current"] = format_base_integer(int(CONSTANTS[char]))
+            else:
+                state["current"] = format_number(CONSTANTS[char])
             state["display_value"] = ""
             state["editing_exponent"] = False
             state["last_was_equals"] = False
             update_display()
 
         elif char == "+/-":
-            toggle_sign()
+            if is_base_mode_active():
+                handle_base_unary("NEG")
+            else:
+                toggle_sign()
 
         elif char == "EXP":
-            start_exponent_edit()
+            if not is_base_mode_active():
+                start_exponent_edit()
 
         elif char == "M in":
             if state["current"] and state["current"] != "Error":
-                value = float(state["current"])
+                value = current_numeric_value()
                 if value == 0:
                     clear_memory()
                 else:
@@ -628,7 +1071,7 @@ def main(page: ft.Page):
 
         elif char == "M+":
             if state["current"] and state["current"] != "Error":
-                state["memory"] = state["memory"] + float(state["current"])
+                state["memory"] = state["memory"] + current_numeric_value()
                 state["has_memory"] = True
                 update_display()
 
@@ -647,21 +1090,12 @@ def main(page: ft.Page):
         elif char in EXTRA_UNARY_FUNCS:
             if state["current"]:
                 try:
-                    result = calc_extra_unary(float(state["current"]), char)
-                    state["current"] = format_number(result)
-                    state["display_value"] = ""
-                    state["editing_exponent"] = False
-                except (ValueError, ZeroDivisionError):
-                    state["current"] = "Error"
-                    state["display_value"] = ""
-                    state["editing_exponent"] = False
-                update_display()
-
-        elif char in TRIG_FUNCS:
-            if state["current"]:
-                try:
-                    result = calc_unary(float(state["current"]), char)
-                    state["current"] = format_number(result)
+                    numeric_value = current_numeric_value() if is_base_mode_active() else float(state["current"])
+                    result = calc_extra_unary(float(numeric_value), char)
+                    if is_base_mode_active():
+                        state["current"] = format_result_value(normalize_base_word(int(result)))
+                    else:
+                        state["current"] = format_result_value(result)
                     state["display_value"] = ""
                     state["editing_exponent"] = False
                 except (ValueError, ZeroDivisionError):
@@ -754,9 +1188,44 @@ def main(page: ft.Page):
         page.update()
 
     def toggle_base_mode(_):
-        state["base_mode"] = "Base" if state["base_mode"] == "Normal" else "Normal"
+        entering_base_mode = state["base_mode"] == "Normal"
+        shown_value = state["display_value"] or state["current"] or "0"
+        state["base_mode"] = "Base" if entering_base_mode else "Normal"
+        state["tokens"] = []
+        state["display_value"] = ""
+        state["replace_on_next_input"] = False
+        state["editing_exponent"] = False
+        state["last_was_equals"] = False
+        if entering_base_mode:
+            try:
+                numeric_value = int(float(shown_value))
+            except ValueError:
+                numeric_value = 0
+            state["base_format"] = "DEC"
+            state["current"] = format_base_integer(normalize_base_word(numeric_value), "DEC")
+        else:
+            try:
+                numeric_text = convert_base_text_to_signed_decimal_text(shown_value, state["base_format"])
+            except ValueError:
+                numeric_text = "0"
+            state["current"] = numeric_text
         refresh_mode_control()
-        page.update()
+        update_display()
+
+    def update_function_buttons():
+        layout = BASE_FUNCTION_LAYOUT if is_base_mode_active() else NORMAL_FUNCTION_LAYOUT
+        for index, button in enumerate(function_buttons):
+            row = index // 4
+            column = index % 4
+            label = layout[row][column]
+            function_button_texts[index].value = label
+            function_button_texts[index].weight = (
+                ft.FontWeight.BOLD if is_base_mode_active() and label in BASE_SYSTEMS else ft.FontWeight.NORMAL
+            )
+            button.style.bgcolor = ft.Colors.GREEN_200 if is_base_mode_active() else ft.Colors.GREY_200
+            if is_base_mode_active() and label == state["base_format"]:
+                button.style.bgcolor = ft.Colors.GREEN_400
+            button.data = f"FUNC_{index}"
 
     refresh_mode_control()
 
@@ -791,7 +1260,7 @@ def main(page: ft.Page):
         height=32,
         bgcolor=ft.Colors.with_opacity(0.0, ft.Colors.GREY_200),
         border_radius=6,
-        padding=ft.padding.only(left=24, top=2, right=24, bottom=2),
+        padding=ft.padding.only(left=18, top=2, right=18, bottom=2),
     )
 
     base_mode_control = ft.Container(
@@ -825,7 +1294,7 @@ def main(page: ft.Page):
         height=32,
         bgcolor=ft.Colors.with_opacity(0.0, ft.Colors.GREY_200),
         border_radius=6,
-        padding=ft.padding.only(left=24, top=2, right=24, bottom=2),
+        padding=ft.padding.only(left=18, top=2, right=18, bottom=2),
     )
 
     # --- Button factory ---
@@ -879,92 +1348,257 @@ def main(page: ft.Page):
     memory_in_button = btn("M in")
     memory_plus_button = btn("M+")
     memory_recall_button = btn("MR")
+    clear_button = btn("C", bgcolor=CLR_BG, text_weight=ft.FontWeight.BOLD)
+    clear_entry_button = btn("CE", bgcolor=CLR_BG, text_weight=ft.FontWeight.BOLD)
+    digit_0_button = btn("0", text_size=19, text_weight=ft.FontWeight.BOLD)
+    digit_1_button = btn("1", text_size=19, text_weight=ft.FontWeight.BOLD)
+    digit_2_button = btn("2", text_size=19, text_weight=ft.FontWeight.BOLD)
+    digit_3_button = btn("3", text_size=19, text_weight=ft.FontWeight.BOLD)
+    digit_4_button = btn("4", text_size=19, text_weight=ft.FontWeight.BOLD)
+    digit_5_button = btn("5", text_size=19, text_weight=ft.FontWeight.BOLD)
+    digit_6_button = btn("6", text_size=19, text_weight=ft.FontWeight.BOLD)
+    digit_7_button = btn("7", text_size=19, text_weight=ft.FontWeight.BOLD)
+    digit_8_button = btn("8", text_size=19, text_weight=ft.FontWeight.BOLD)
+    digit_9_button = btn("9", text_size=19, text_weight=ft.FontWeight.BOLD)
+    decimal_button = btn(".", text_size=19, text_weight=ft.FontWeight.BOLD)
+    sign_button = btn("+/-", text_size=19, text_weight=ft.FontWeight.BOLD)
+    exp_button = btn("EXP", text_size=19, text_weight=ft.FontWeight.BOLD)
+    equals_button = btn("=", bgcolor=EQ_BG, text_size=19, text_weight=ft.FontWeight.BOLD)
+    multiply_button = btn("*", bgcolor=OP_BG, text_size=19, text_weight=ft.FontWeight.BOLD)
+    divide_button = btn("/", bgcolor=OP_BG, text_size=19, text_weight=ft.FontWeight.BOLD)
+    plus_button = btn("+", bgcolor=OP_BG, text_size=19, text_weight=ft.FontWeight.BOLD)
+    minus_button = btn("−", data="-", bgcolor=OP_BG, text_size=19, text_weight=ft.FontWeight.BOLD)
+    reciprocal_button = btn("1/x")
+    sqrt_button = btn("√x̅", data="sqrt")
+    square_button = btn("x²", data="x^2")
+    power_button = btn("xʸ", data="^")
+    const_pi_button = btn("π", data="CONST_PI")
+    const_c_button = btn("c", data="CONST_C")
+    const_h_button = btn("ℏ", data="CONST_H")
+    const_g_button = btn("G", data="CONST_G")
+    function_button_texts = [
+        ft.Text("", size=17, weight=ft.FontWeight.NORMAL, text_align=ft.TextAlign.CENTER, no_wrap=True)
+        for _ in range(16)
+    ]
+    function_buttons = [
+        btn("", data=f"FUNC_{index}", text_ref=function_button_texts[index])
+        for index in range(16)
+    ]
+
+    memory_row = ft.Row(
+        [clear_button, clear_entry_button, memory_in_button, memory_plus_button, memory_recall_button],
+        spacing=8,
+    )
+    keypad_row_7_9 = ft.Row(
+        [digit_7_button, digit_8_button, digit_9_button, open_bracket_button, close_bracket_button],
+        spacing=8,
+    )
+    keypad_row_4_6 = ft.Row(
+        [digit_4_button, digit_5_button, digit_6_button, multiply_button, divide_button],
+        spacing=8,
+    )
+    keypad_row_1_3 = ft.Row(
+        [digit_1_button, digit_2_button, digit_3_button, plus_button, minus_button],
+        spacing=8,
+    )
+    keypad_row_0_equals = ft.Row(
+        [digit_0_button, decimal_button, sign_button, exp_button, equals_button],
+        spacing=8,
+    )
+    scientific_top_row = ft.Row([reciprocal_button, sqrt_button, square_button, power_button], spacing=8)
+    scientific_row_1 = ft.Row(function_buttons[0:4], spacing=8)
+    scientific_row_2 = ft.Row(function_buttons[4:8], spacing=8)
+    scientific_row_3 = ft.Row(function_buttons[8:12], spacing=8)
+    scientific_row_4 = ft.Row(function_buttons[12:16], spacing=8)
+    constants_row = ft.Row([const_pi_button, const_c_button, const_h_button, const_g_button], spacing=8)
+    landscape_scientific_buttons = [
+        reciprocal_button,
+        sqrt_button,
+        square_button,
+        power_button,
+        *function_buttons,
+        const_pi_button,
+        const_c_button,
+        const_h_button,
+        const_g_button,
+    ]
+    landscape_left_buttons = [
+        clear_button,
+        clear_entry_button,
+        memory_in_button,
+        memory_plus_button,
+        memory_recall_button,
+        digit_0_button,
+        digit_1_button,
+        digit_2_button,
+        digit_3_button,
+        digit_4_button,
+        digit_5_button,
+        digit_6_button,
+        digit_7_button,
+        digit_8_button,
+        digit_9_button,
+        decimal_button,
+        sign_button,
+        exp_button,
+        equals_button,
+        multiply_button,
+        divide_button,
+        plus_button,
+        minus_button,
+        open_bracket_button,
+        close_bracket_button,
+    ]
+
+    top_spacer = ft.Container(height=0, bgcolor=ft.Colors.BLACK)
+    top_display_band = ft.Container(
+        bgcolor=TOP_BG,
+        padding=ft.padding.only(top=6, bottom=8),
+        content=ft.Row([display_card], alignment=ft.MainAxisAlignment.CENTER),
+    )
+
+    top_section = ft.Container(
+        padding=ft.padding.only(bottom=2),
+        content=ft.Column(
+            spacing=2,
+            controls=[
+                top_spacer,
+                top_display_band,
+            ],
+        ),
+    )
+
+    switch_section = ft.Container(
+        bgcolor=SWITCH_BG,
+        padding=ft.padding.symmetric(horizontal=6, vertical=4),
+        content=ft.Row([mode_control, base_mode_control], spacing=8),
+    )
+
+    portrait_keypad_section = ft.Container(
+        bgcolor=ft.Colors.BLACK,
+        padding=ft.padding.all(8),
+        expand=True,
+        content=ft.Column(
+            spacing=8,
+            controls=[
+                memory_row,
+                keypad_row_7_9,
+                keypad_row_4_6,
+                keypad_row_1_3,
+                keypad_row_0_equals,
+                scientific_top_row,
+                scientific_row_1,
+                scientific_row_2,
+                scientific_row_3,
+                scientific_row_4,
+                constants_row,
+            ],
+        ),
+    )
+
+    landscape_left_section = ft.Container(
+        bgcolor=ft.Colors.BLACK,
+        padding=ft.padding.all(8),
+        border=ft.border.only(right=ft.BorderSide(1, ft.Colors.GREY_700)),
+        expand=True,
+        content=ft.Column(
+            spacing=8,
+            controls=[
+                memory_row,
+                keypad_row_7_9,
+                keypad_row_4_6,
+                keypad_row_1_3,
+                keypad_row_0_equals,
+            ],
+        ),
+    )
+
+    landscape_right_section = ft.Container(
+        bgcolor=ft.Colors.BLACK,
+        padding=ft.padding.all(8),
+        expand=True,
+        content=ft.Column(
+            spacing=8,
+            controls=[
+                scientific_top_row,
+                scientific_row_1,
+                scientific_row_2,
+                scientific_row_3,
+                scientific_row_4,
+                constants_row,
+            ],
+        ),
+    )
+
+    layout_host = ft.Container(expand=True)
+    safe_area = ft.SafeArea(
+        minimum_padding=ft.padding.only(left=10, top=0, right=10, bottom=10),
+        content=ft.Container(
+            content=layout_host,
+            border=ft.border.all(1, ft.Colors.GREY_700),
+        ),
+    )
+
+    def build_portrait_layout():
+        return ft.Column(
+            expand=True,
+            spacing=2,
+            controls=[
+                top_section,
+                switch_section,
+                portrait_keypad_section,
+            ],
+        )
+
+    def build_landscape_layout():
+        return ft.Row(
+            expand=True,
+            spacing=8,
+            controls=[
+                ft.Container(
+                    expand=5,
+                    content=ft.Column(
+                        expand=True,
+                        spacing=2,
+                        controls=[
+                            top_section,
+                            switch_section,
+                            landscape_left_section,
+                        ],
+                    ),
+                ),
+                ft.Container(
+                    expand=4,
+                    content=landscape_right_section,
+                ),
+            ],
+        )
+
+    def apply_responsive_layout():
+        is_landscape = bool(page.width and page.height and page.width > page.height)
+        top_spacer.height = 0
+        top_display_band.padding = ft.padding.only(top=2, bottom=4) if is_landscape else ft.padding.only(top=6, bottom=8)
+        switch_section.padding = ft.padding.symmetric(horizontal=5, vertical=2) if is_landscape else ft.padding.symmetric(horizontal=6, vertical=4)
+        landscape_left_section.padding = ft.padding.all(4) if is_landscape else ft.padding.all(8)
+        landscape_right_section.padding = ft.padding.all(4) if is_landscape else ft.padding.all(8)
+        landscape_left_section.content.spacing = 5 if is_landscape else 8
+        landscape_right_section.content.spacing = 7 if is_landscape else 8
+        left_button_height = 39 if is_landscape else 45
+        scientific_button_height = 47 if is_landscape else 45
+        for button in landscape_left_buttons:
+            button.height = left_button_height
+        for button in landscape_scientific_buttons:
+            button.height = scientific_button_height
+        layout_host.content = build_landscape_layout() if is_landscape else build_portrait_layout()
+        page.update()
 
     # --- Layout ---
-    page.add(
-        ft.SafeArea(
-            minimum_padding=ft.padding.only(left=10, top=0, right=10, bottom=10),
-            content=ft.Column(
-                expand=True,
-                spacing=2,
-                controls=[
-                    ft.Container(
-                        padding=ft.padding.only(bottom=2),
-                        content=ft.Column(
-                            spacing=2,
-                            controls=[
-                                ft.Container(height=24, bgcolor=ft.Colors.BLACK),
-                                ft.Container(
-                                    bgcolor=TOP_BG,
-                                    padding=ft.padding.only(top=6, bottom=8),
-                                    content=ft.Row([display_card], alignment=ft.MainAxisAlignment.CENTER),
-                                ),
-                            ],
-                        ),
-                    ),
-                    ft.Container(
-                        bgcolor=SWITCH_BG,
-                        padding=ft.padding.symmetric(horizontal=8, vertical=4),
-                        content=ft.Row([mode_control, base_mode_control], spacing=8),
-                    ),
-                    ft.Container(
-                        bgcolor=ft.Colors.BLACK,
-                        padding=ft.padding.all(8),
-                        expand=True,
-                        content=ft.Column(
-                            spacing=8,
-                            controls=[
-                                ft.Row([
-                                    btn("C", bgcolor=CLR_BG, text_weight=ft.FontWeight.BOLD),
-                                    btn("CE", bgcolor=CLR_BG, text_weight=ft.FontWeight.BOLD),
-                                    memory_in_button,
-                                    memory_plus_button,
-                                    memory_recall_button,
-                                ], spacing=8),
-                                ft.Row([
-                                    btn("7", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("8", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("9", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    open_bracket_button,
-                                    close_bracket_button,
-                                ], spacing=8),
-                                ft.Row([
-                                    btn("4", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("5", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("6", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("*", bgcolor=OP_BG, text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("/", bgcolor=OP_BG, text_size=19, text_weight=ft.FontWeight.BOLD),
-                                ], spacing=8),
-                                ft.Row([
-                                    btn("1", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("2", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("3", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("+", bgcolor=OP_BG, text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("−", data="-", bgcolor=OP_BG, text_size=19, text_weight=ft.FontWeight.BOLD),
-                                ], spacing=8),
-                                ft.Row([
-                                    btn("0", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn(".", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("+/-", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("EXP", text_size=19, text_weight=ft.FontWeight.BOLD),
-                                    btn("=", bgcolor=EQ_BG, text_size=19, text_weight=ft.FontWeight.BOLD),
-                                ], spacing=8),
-                                ft.Row([btn("1/x"), btn("√x̅", data="sqrt"), btn("x²", data="x^2"), btn("xʸ", data="^")], spacing=8),
-                                ft.Row([btn("sin"), btn("cos"), btn("tan"), btn("cot")], spacing=8),
-                                ft.Row([btn("asin"), btn("acos"), btn("atan"), btn("acot")], spacing=8),
-                                ft.Row([btn("sinh"), btn("cosh"), btn("tanh"), btn("coth")], spacing=8),
-                                ft.Row([btn("asinh"), btn("acosh"), btn("atanh"), btn("acoth")], spacing=8),
-                                ft.Row([btn("π", data="CONST_PI"), btn("c", data="CONST_C"), btn("ℏ", data="CONST_H"), btn("G", data="CONST_G")], spacing=8),
-                            ],
-                        ),
-                    ),
-                ],
-            ),
-        )
-    )
+    page.add(safe_area)
+    page.on_resize = lambda _: apply_responsive_layout()
 
     update_bracket_buttons()
     update_memory_buttons()
-
-
-ft.run(main)
+    update_function_buttons()
+    apply_responsive_layout()
+if __name__ == "__main__":
+    ft.run(main)

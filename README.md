@@ -1,6 +1,6 @@
 # fx451m-Calculator
 
-A cross-platform scientific calculator built with Flet. The current app entry point is `main.py` and the same codebase runs on desktop and Android.
+A cross-platform scientific calculator built with Flet. The current app entry point is `main.py` and the same codebase runs on desktop and Android. The functionality and layout was inspired by the "CASIO Scientific Calculator fx-451M".
 
 ## Features
 
