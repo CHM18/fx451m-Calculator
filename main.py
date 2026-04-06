@@ -1460,7 +1460,7 @@ def main(page: ft.Page):
     top_section = ft.Container(
         padding=ft.padding.only(bottom=2),
         content=ft.Column(
-            spacing=2,
+            spacing=0,
             controls=[
                 top_spacer,
                 top_display_band,
