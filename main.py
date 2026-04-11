@@ -1348,7 +1348,7 @@ def main(page: ft.Page):
     memory_in_button = btn("M in")
     memory_plus_button = btn("M+")
     memory_recall_button = btn("MR")
-    clear_button = btn("C", bgcolor=CLR_BG, text_weight=ft.FontWeight.BOLD)
+    clear_button = btn("AC", bgcolor=CLR_BG, text_weight=ft.FontWeight.BOLD)
     clear_entry_button = btn("CE", bgcolor=CLR_BG, text_weight=ft.FontWeight.BOLD)
     digit_0_button = btn("0", text_size=19, text_weight=ft.FontWeight.BOLD)
     digit_1_button = btn("1", text_size=19, text_weight=ft.FontWeight.BOLD)

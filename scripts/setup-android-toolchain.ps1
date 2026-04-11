@@ -251,9 +251,15 @@ $packages = @(
 
 Write-Step "Accepting Android SDK licenses"
 (1..200 | ForEach-Object { "y" }) | & $sdkManager "--sdk_root=$AndroidSdkRoot" --licenses
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed while accepting Android SDK licenses."
+}
 
 Write-Step "Installing Android SDK packages"
 & $sdkManager "--sdk_root=$AndroidSdkRoot" @packages
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed while installing Android SDK packages."
+}
 
 $expectedPaths = @(
     (Join-Path $AndroidSdkRoot "platform-tools"),
@@ -262,7 +268,7 @@ $expectedPaths = @(
     (Join-Path $javaHome "bin\java.exe")
 )
 
-$missingPaths = $expectedPaths | Where-Object { -not (Test-Path $_) }
+$missingPaths = @($expectedPaths | Where-Object { -not (Test-Path $_) })
 if ($missingPaths.Count -gt 0) {
     throw "Android setup completed with missing expected paths:`n$($missingPaths -join "`n")"
 }
