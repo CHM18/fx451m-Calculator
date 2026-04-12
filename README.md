@@ -32,24 +32,42 @@ A cross-platform scientific calculator built with Flet. The current app entry po
 python main.py
 ```
 
-## Build Android APK
+## Build Artifacts
 
-See [README_Android.md](README_Android.md) for Android-specific instructions.
+Use the PowerShell build script to create the Windows EXE, the Android APK, or both in one run.
 
-On Windows, you can provision Java and the Android SDK with:
+Build both targets:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass -Force
-.\scripts\setup-android-toolchain.ps1
+\.\scripts\build-windows-exe.ps1
 ```
 
-Then build the APK with:
+Build only the Windows EXE:
 
-```bash
-flet build apk
+```powershell
+.\scripts\build-windows-exe.ps1 -Targets windows
 ```
 
-The generated APK is written to `build/apk/`.
+Build only the Android APK:
+
+```powershell
+.\scripts\build-windows-exe.ps1 -Targets android
+```
+
+Clean previous outputs first:
+
+```powershell
+.\scripts\build-windows-exe.ps1 -Clean
+```
+
+Notes:
+
+- The script uses `fx_icon.png` as the source icon for the Windows EXE and generates `build/flutter/images/icon.ico` automatically.
+- The Android toolchain bootstrap is invoked automatically from `scripts/setup-android-toolchain.ps1` when the Android target is selected.
+- The Windows EXE is written to `dist/`.
+- The Android APK is typically written under `build/apk/`.
+
+See [README_Android.md](README_Android.md) for additional Android-specific background.
 
 ## Requirements
 
@@ -59,3 +77,8 @@ The generated APK is written to `build/apk/`.
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+## To Do:
+- write unit tests
+- add financial and statistical functions (extra switch)
+- add log, ln, e^x and x!

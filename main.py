@@ -264,6 +264,33 @@ def main(page: ft.Page):
     page.padding = 0
     page.bgcolor = ft.Colors.BLACK
 
+    is_android = page.platform == ft.PagePlatform.ANDROID
+    haptic_feedback = ft.HapticFeedback() if is_android else None
+
+    async def trigger_key_haptic_feedback():
+        if haptic_feedback is None:
+            return
+        try:
+            await haptic_feedback.selection_click()
+        except Exception:
+            # Keep key processing uninterrupted if haptic feedback is unavailable.
+            return
+
+    def trigger_key_feedback():
+        if is_android:
+            page.run_task(trigger_key_haptic_feedback)
+
+    def get_pressed_button_bg(base_bg):
+        if base_bg == ft.Colors.GREY_200:
+            return ft.Colors.GREY_300
+        if base_bg == ft.Colors.ORANGE_200:
+            return ft.Colors.ORANGE_300
+        if base_bg == ft.Colors.BLUE_200:
+            return ft.Colors.BLUE_300
+        if base_bg == ft.Colors.RED_200:
+            return ft.Colors.RED_300
+        return base_bg
+
     # --- Calculator state ---
     state = {
         "current": "",
@@ -992,6 +1019,8 @@ def main(page: ft.Page):
         if char is None:
             return
 
+        trigger_key_feedback()
+
         if isinstance(char, str) and char.startswith("FUNC_"):
             handle_function_button(char)
             return
@@ -1166,16 +1195,33 @@ def main(page: ft.Page):
         bgcolor=ft.Colors.GREY_700,
         padding=ft.padding.symmetric(horizontal=3, vertical=2),
     )
+    mode_control = None
 
     def refresh_mode_control():
         is_deg = state["mode"] == "Deg"
-        mode_rad_label.color = ft.Colors.GREY_500 if is_deg else ft.Colors.BLACK
-        mode_deg_label.color = ft.Colors.BLACK if is_deg else ft.Colors.GREY_500
+        is_base_mode = state["base_mode"] == "Base"
+
+        if is_base_mode:
+            mode_rad_label.color = ft.Colors.GREY_500
+            mode_deg_label.color = ft.Colors.GREY_500
+        else:
+            mode_rad_label.color = ft.Colors.GREY_500 if is_deg else ft.Colors.BLACK
+            mode_deg_label.color = ft.Colors.BLACK if is_deg else ft.Colors.GREY_500
         mode_track.content.alignment = (
             ft.MainAxisAlignment.END if is_deg else ft.MainAxisAlignment.START
         )
+        mode_track.bgcolor = ft.Colors.GREY_500 if is_base_mode else ft.Colors.GREY_700
+        mode_thumb.bgcolor = ft.Colors.GREY_400 if is_base_mode else ft.Colors.GREY_300
 
-        is_base_mode = state["base_mode"] == "Base"
+        if mode_control is not None:
+            mode_control.on_click = None if is_base_mode else toggle_mode
+            mode_control.opacity = 0.55 if is_base_mode else 1.0
+            mode_control.bgcolor = (
+                ft.Colors.with_opacity(0.1, ft.Colors.GREY_400)
+                if is_base_mode
+                else ft.Colors.with_opacity(0.0, ft.Colors.GREY_200)
+            )
+
         base_normal_label.color = ft.Colors.GREY_500 if is_base_mode else ft.Colors.BLACK
         base_bases_label.color = ft.Colors.BLACK if is_base_mode else ft.Colors.GREY_500
         base_track.content.alignment = (
@@ -1183,11 +1229,15 @@ def main(page: ft.Page):
         )
 
     def toggle_mode(_):
+        if state["base_mode"] == "Base":
+            return
+        trigger_key_feedback()
         state["mode"] = "Deg" if state["mode"] == "Rad" else "Rad"
         refresh_mode_control()
         page.update()
 
     def toggle_base_mode(_):
+        trigger_key_feedback()
         entering_base_mode = state["base_mode"] == "Normal"
         shown_value = state["display_value"] or state["current"] or "0"
         state["base_mode"] = "Base" if entering_base_mode else "Normal"
@@ -1297,8 +1347,11 @@ def main(page: ft.Page):
         padding=ft.padding.only(left=18, top=2, right=18, bottom=2),
     )
 
+    refresh_mode_control()
+
     # --- Button factory ---
     def btn(label, data=None, bgcolor=None, color=None, text_size=17, text_weight=ft.FontWeight.NORMAL, text_ref=None):
+        base_bg = bgcolor or ft.Colors.GREY_200
         return ft.Button(
             content=ft.Container(
                 content=text_ref or ft.Text(
@@ -1316,8 +1369,21 @@ def main(page: ft.Page):
             expand=True,
             height=45,
             style=ft.ButtonStyle(
-                bgcolor=bgcolor or ft.Colors.GREY_200,
+                bgcolor={
+                    ft.ControlState.DEFAULT: base_bg,
+                    ft.ControlState.PRESSED: get_pressed_button_bg(base_bg),
+                },
                 color=color or ft.Colors.BLACK,
+                overlay_color={
+                    ft.ControlState.PRESSED: ft.Colors.with_opacity(0.12, ft.Colors.BLACK),
+                    ft.ControlState.HOVERED: ft.Colors.with_opacity(0.05, ft.Colors.BLACK),
+                },
+                elevation={
+                    ft.ControlState.DEFAULT: 1,
+                    ft.ControlState.PRESSED: 0.25,
+                },
+                animation_duration=90,
+                enable_feedback=True,
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=ft.padding.all(0),
             ),
