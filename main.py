@@ -34,10 +34,47 @@ def count_digits(value):
     return sum(1 for char in value if char.isdigit())
 
 
+def _safe_sin(x):
+    """sin(x) with exact zeros at integer multiples of π."""
+    n = round(2 * x / math.pi)
+    r = x - n * (math.pi / 2)
+    n_mod = int(n) % 4
+    if n_mod == 0:
+        return math.sin(r)
+    elif n_mod == 1:
+        return math.cos(r)
+    elif n_mod == 2:
+        return -math.sin(r)
+    else:
+        return -math.cos(r)
+
+
+def _safe_cos(x):
+    """cos(x) with exact zeros at odd multiples of π/2."""
+    n = round(2 * x / math.pi)
+    r = x - n * (math.pi / 2)
+    n_mod = int(n) % 4
+    if n_mod == 0:
+        return math.cos(r)
+    elif n_mod == 1:
+        return -math.sin(r)
+    elif n_mod == 2:
+        return -math.cos(r)
+    else:
+        return math.sin(r)
+
+
+def _safe_tan(x):
+    """tan(x) with exact zeros at integer multiples of π."""
+    n = round(x / math.pi)
+    r = x - n * math.pi
+    return math.tan(r)
+
+
 def format_decimal_number(value):
     if value == 0:
         return "0"
-    return f"{value:.12g}"
+    return f"{value:.17g}"
 
 
 def normalize_base_value(value):
@@ -461,10 +498,23 @@ def main(page: ft.Page):
             return "0", ""
         if value == "Error":
             return "Error", ""
-        if "e" not in value.lower():
+        lower_value = value.lower()
+        if "e" not in lower_value:
+            # Truncate to display precision (12 sig figs) for plain decimal values.
+            # Skip partial inputs while the user is still typing.
+            if not value.endswith("."):
+                try:
+                    value = f"{float(value):.12g}"
+                except ValueError:
+                    pass
             return value, ""
 
-        mantissa, exponent = value.lower().split("e", 1)
+        mantissa, exponent = lower_value.split("e", 1)
+        if not mantissa.endswith("."):
+            try:
+                mantissa = f"{float(mantissa):.12g}"
+            except ValueError:
+                pass
         exponent_value = int(exponent)
         if exponent_value < 0:
             exponent_text = f"-{abs(exponent_value):03d}"
@@ -958,13 +1008,13 @@ def main(page: ft.Page):
             x = math.radians(x)
 
         if func == "sin":
-            result = math.sin(x)
+            result = _safe_sin(x)
         elif func == "cos":
-            result = math.cos(x)
+            result = _safe_cos(x)
         elif func == "tan":
-            result = math.tan(x)
+            result = _safe_tan(x)
         elif func == "cot":
-            t = math.tan(x)
+            t = _safe_tan(x)
             if t == 0:
                 raise ValueError("Undefined")
             result = 1 / t
@@ -1146,7 +1196,7 @@ def main(page: ft.Page):
                 state["last_was_equals"] = False
             update_display()
 
-        elif char == "C":
+        elif char == "AC":
             clear()
         elif char == "CE":
             clear_entry()
