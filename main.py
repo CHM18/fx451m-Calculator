@@ -301,6 +301,25 @@ def main(page: ft.Page):
     page.padding = 0
     page.bgcolor = ft.Colors.BLACK
 
+    # Try to set a native window icon on Windows desktop builds.
+    try:
+        import sys, os
+
+        def _resource_path(name: str) -> str:
+            if getattr(sys, "frozen", False):
+                base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+            else:
+                base = os.path.dirname(__file__)
+            return os.path.join(base, name)
+
+        if page.platform == ft.PagePlatform.WINDOWS:
+            ico_path = _resource_path("icon.ico")
+            if os.path.exists(ico_path):
+                page.window.icon = ico_path
+    except Exception:
+        # Non-critical; continue if setting icon fails
+        pass
+
     is_android = page.platform == ft.PagePlatform.ANDROID
     haptic_feedback = ft.HapticFeedback() if is_android else None
 
@@ -500,8 +519,10 @@ def main(page: ft.Page):
             return "Error", ""
         lower_value = value.lower()
         if "e" not in lower_value:
-            # Truncate to display precision (12 sig figs) for plain decimal values.
-            # Skip partial inputs while the user is still typing.
+            # Preserve explicit decimal input as the user types it,
+            # including trailing zeros after a decimal point.
+            if "." in value:
+                return value, ""
             if not value.endswith("."):
                 try:
                     value = f"{float(value):.12g}"
@@ -603,9 +624,9 @@ def main(page: ft.Page):
     display_card = ft.Container(
         content=display,
         alignment=ft.Alignment(0, 0),
-        padding=ft.padding.symmetric(horizontal=8, vertical=2),
+        padding=ft.padding.Padding(8, 2, 8, 2),
         bgcolor=ft.Colors.GREY_100,
-        border=ft.border.all(6, ft.Colors.BROWN_400),
+        border=ft.Border.all(6, ft.Colors.BROWN_400),
         border_radius=12,
         width=336,
         height=58,
@@ -1221,7 +1242,7 @@ def main(page: ft.Page):
         height=24,
         border_radius=12,
         bgcolor=ft.Colors.GREY_700,
-        padding=ft.padding.symmetric(horizontal=3, vertical=2),
+        padding=ft.padding.Padding(3, 2, 3, 2),
     )
 
     base_normal_label = ft.Text("Std", size=11, weight=ft.FontWeight.BOLD)
@@ -1243,7 +1264,7 @@ def main(page: ft.Page):
         height=24,
         border_radius=12,
         bgcolor=ft.Colors.GREY_700,
-        padding=ft.padding.symmetric(horizontal=3, vertical=2),
+        padding=ft.padding.Padding(3, 2, 3, 2),
     )
     mode_control = None
 
@@ -1336,7 +1357,7 @@ def main(page: ft.Page):
                     content=mode_rad_label,
                     expand=True,
                     alignment=ft.Alignment(-1, 0),
-                    padding=ft.padding.only(bottom=2),
+                    padding=ft.padding.Padding(0, 0, 0, 2),
                 ),
                 ft.Container(
                     content=mode_track,
@@ -1347,7 +1368,7 @@ def main(page: ft.Page):
                     content=mode_deg_label,
                     expand=True,
                     alignment=ft.Alignment(1, 0),
-                    padding=ft.padding.only(bottom=2),
+                    padding=ft.padding.Padding(0, 0, 0, 2),
                 ),
             ],
             alignment=ft.MainAxisAlignment.CENTER,
@@ -1360,7 +1381,7 @@ def main(page: ft.Page):
         height=32,
         bgcolor=ft.Colors.with_opacity(0.0, ft.Colors.GREY_200),
         border_radius=6,
-        padding=ft.padding.only(left=18, top=2, right=18, bottom=2),
+        padding=ft.padding.Padding(18, 2, 18, 2),
     )
 
     base_mode_control = ft.Container(
@@ -1370,7 +1391,7 @@ def main(page: ft.Page):
                     content=base_normal_label,
                     expand=True,
                     alignment=ft.Alignment(-1, 0),
-                    padding=ft.padding.only(bottom=2),
+                    padding=ft.padding.Padding(0, 0, 0, 2),
                 ),
                 ft.Container(
                     content=base_track,
@@ -1381,7 +1402,7 @@ def main(page: ft.Page):
                     content=base_bases_label,
                     expand=True,
                     alignment=ft.Alignment(1, 0),
-                    padding=ft.padding.only(bottom=2),
+                    padding=ft.padding.Padding(0, 0, 0, 2),
                 ),
             ],
             alignment=ft.MainAxisAlignment.CENTER,
@@ -1394,7 +1415,7 @@ def main(page: ft.Page):
         height=32,
         bgcolor=ft.Colors.with_opacity(0.0, ft.Colors.GREY_200),
         border_radius=6,
-        padding=ft.padding.only(left=18, top=2, right=18, bottom=2),
+        padding=ft.padding.Padding(18, 2, 18, 2),
     )
 
     refresh_mode_control()
@@ -1412,7 +1433,7 @@ def main(page: ft.Page):
                     no_wrap=True,
                 ),
                 alignment=ft.Alignment(0, 0),
-                padding=ft.padding.symmetric(horizontal=3, vertical=2),
+                padding=ft.padding.Padding(3, 2, 3, 2),
             ),
             data=data if data is not None else label,
             on_click=on_click,
@@ -1435,7 +1456,7 @@ def main(page: ft.Page):
                 animation_duration=90,
                 enable_feedback=True,
                 shape=ft.RoundedRectangleBorder(radius=6),
-                padding=ft.padding.all(0),
+                padding=0,
             ),
         )
 
@@ -1569,12 +1590,12 @@ def main(page: ft.Page):
     top_spacer = ft.Container(height=0, bgcolor=ft.Colors.BLACK)
     top_display_band = ft.Container(
         bgcolor=TOP_BG,
-        padding=ft.padding.only(top=6, bottom=8),
+        padding=ft.padding.Padding(0, 6, 0, 8),
         content=ft.Row([display_card], alignment=ft.MainAxisAlignment.CENTER),
     )
 
     top_section = ft.Container(
-        padding=ft.padding.only(bottom=2),
+        padding=ft.padding.Padding(0, 0, 0, 2),
         content=ft.Column(
             spacing=0,
             controls=[
@@ -1586,13 +1607,13 @@ def main(page: ft.Page):
 
     switch_section = ft.Container(
         bgcolor=SWITCH_BG,
-        padding=ft.padding.symmetric(horizontal=6, vertical=4),
+        padding=ft.padding.Padding(6, 4, 6, 4),
         content=ft.Row([mode_control, base_mode_control], spacing=8),
     )
 
     portrait_keypad_section = ft.Container(
         bgcolor=ft.Colors.BLACK,
-        padding=ft.padding.all(8),
+        padding=8,
         expand=True,
         content=ft.Column(
             spacing=8,
@@ -1614,8 +1635,8 @@ def main(page: ft.Page):
 
     landscape_left_section = ft.Container(
         bgcolor=ft.Colors.BLACK,
-        padding=ft.padding.all(8),
-        border=ft.border.only(right=ft.BorderSide(1, ft.Colors.GREY_700)),
+        padding=8,
+        border=ft.Border.only(right=ft.BorderSide(1, ft.Colors.GREY_700)),
         expand=True,
         content=ft.Column(
             spacing=8,
@@ -1631,7 +1652,7 @@ def main(page: ft.Page):
 
     landscape_right_section = ft.Container(
         bgcolor=ft.Colors.BLACK,
-        padding=ft.padding.all(8),
+        padding=8,
         expand=True,
         content=ft.Column(
             spacing=8,
@@ -1648,10 +1669,10 @@ def main(page: ft.Page):
 
     layout_host = ft.Container(expand=True)
     safe_area = ft.SafeArea(
-        minimum_padding=ft.padding.only(left=10, top=0, right=10, bottom=10),
+        minimum_padding=ft.padding.Padding(10, 0, 10, 10),
         content=ft.Container(
             content=layout_host,
-            border=ft.border.all(1, ft.Colors.GREY_700),
+            border=ft.Border.all(1, ft.Colors.GREY_700),
         ),
     )
 
@@ -1693,10 +1714,10 @@ def main(page: ft.Page):
     def apply_responsive_layout():
         is_landscape = bool(page.width and page.height and page.width > page.height)
         top_spacer.height = 0
-        top_display_band.padding = ft.padding.only(top=2, bottom=4) if is_landscape else ft.padding.only(top=6, bottom=8)
-        switch_section.padding = ft.padding.symmetric(horizontal=5, vertical=2) if is_landscape else ft.padding.symmetric(horizontal=6, vertical=4)
-        landscape_left_section.padding = ft.padding.all(4) if is_landscape else ft.padding.all(8)
-        landscape_right_section.padding = ft.padding.all(4) if is_landscape else ft.padding.all(8)
+        top_display_band.padding = ft.padding.Padding(0, 2, 0, 4) if is_landscape else ft.padding.Padding(0, 6, 0, 8)
+        switch_section.padding = ft.padding.Padding(5, 2, 5, 2) if is_landscape else ft.padding.Padding(6, 4, 6, 4)
+        landscape_left_section.padding = 4 if is_landscape else 8
+        landscape_right_section.padding = 4 if is_landscape else 8
         landscape_left_section.content.spacing = 5 if is_landscape else 8
         landscape_right_section.content.spacing = 7 if is_landscape else 8
         left_button_height = 39 if is_landscape else 45
@@ -1717,4 +1738,28 @@ def main(page: ft.Page):
     update_function_buttons()
     apply_responsive_layout()
 if __name__ == "__main__":
-    ft.run(main)
+    import traceback
+
+    def _safe_main(page: ft.Page):
+        try:
+            main(page)
+        except Exception:
+            tb = traceback.format_exc()
+            try:
+                import sys
+                print(tb, file=sys.stderr)
+            except Exception:
+                pass
+            page.controls.clear()
+            page.add(
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("Startup error", size=20, weight=ft.FontWeight.BOLD, color=ft.Colors.RED),
+                        ft.Text(tb, selectable=True),
+                    ]),
+                    padding=12,
+                )
+            )
+            page.update()
+
+    ft.run(_safe_main)

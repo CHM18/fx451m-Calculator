@@ -39,25 +39,25 @@ Use the PowerShell build script to create the Windows EXE, the Android APK, or b
 Build both targets:
 
 ```powershell
-\.\scripts\build-windows-exe.ps1
+.\scripts\build-android-windows-exe.ps1
 ```
 
 Build only the Windows EXE:
 
 ```powershell
-.\scripts\build-windows-exe.ps1 -Targets windows
+.\scripts\build-android-windows-exe.ps1 -Targets windows
 ```
 
 Build only the Android APK:
 
 ```powershell
-.\scripts\build-windows-exe.ps1 -Targets android
+.\scripts\build-android-windows-exe.ps1 -Targets android
 ```
 
 Clean previous outputs first:
 
 ```powershell
-.\scripts\build-windows-exe.ps1 -Clean
+.\scripts\build-android-windows-exe.ps1 -Clean
 ```
 
 Notes:
@@ -67,7 +67,43 @@ Notes:
 - The Windows EXE is written to `dist/`.
 - The Android APK is typically written under `build/apk/`.
 
-See [README_Android.md](README_Android.md) for additional Android-specific background.
+## Android Toolchain and APK Build
+
+For a predictable Windows setup, you can also provision Java and the Android SDK manually with the repo script below:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+.\scripts\setup-android-toolchain.ps1
+```
+
+This script installs a user-scoped JDK 17 and Android SDK, sets `JAVA_HOME`, `ANDROID_HOME`, and `ANDROID_SDK_ROOT`, updates the user `Path`, installs the required Android SDK components, and accepts SDK licenses.
+
+If you prefer the direct Flet build flow for Android, run:
+
+```bash
+pip install flet
+flet build apk
+```
+
+To regenerate the app icon artwork before building:
+
+```bash
+python scripts/generate_icon.py
+```
+
+The APK will appear in `build/apk/`. The first build downloads the Flutter SDK automatically (about 1 GB), so the initial run may take longer.
+
+### Android install notes
+
+1. Enable "Unknown sources" on the device.
+2. Copy the APK to the phone via USB or file sharing.
+3. Open the file and confirm the installation prompt.
+
+### Troubleshooting
+
+- First build is slow because the Flutter SDK is downloaded once.
+- If the build fails, rerun with `flet build apk --no-rich-output` for fuller diagnostics.
+- Make sure Python 3.9+ is installed and enough disk space is available for the toolchain and build artifacts.
 
 ## Requirements
 

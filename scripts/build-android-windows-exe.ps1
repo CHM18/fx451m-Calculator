@@ -122,7 +122,50 @@ print(f\"Wrote {dst}\")
 
     if ($iconArg) {
         $pyInstallerArgs += @("--icon", $iconArg)
+        # Include the ICO file as bundled data so the running app can access it (onefile/_MEIPASS)
+        # Use PyInstaller data syntax: <SRC>;<DEST> (Windows uses ';' separator)
+        $addDataArg = "$iconArg;." 
+        $pyInstallerArgs += @("--add-data", $addDataArg)
     }
+
+        # Create a Windows version resource file so Task Manager shows a proper File Description
+        $versionDir = Join-Path $repoRoot "build"
+        if (-not (Test-Path $versionDir)) { New-Item -Path $versionDir -ItemType Directory | Out-Null }
+        $versionFile = Join-Path $versionDir "version.txt"
+        $versionContent = @"
+# UTF-8
+VSVersionInfo(
+    ffi=FixedFileInfo(
+        filevers=(0,1,0,0),
+        prodvers=(0,1,0,0),
+        mask=0x3f,
+        flags=0x0,
+        OS=0x40004,
+        fileType=0x1,
+        subtype=0x0,
+        date=(0,0)
+    ),
+    kids=[
+        StringFileInfo([
+            StringTable(
+                '040904b0',
+                [
+                    StringStruct('CompanyName', ''),
+                    StringStruct('FileDescription', 'fx451m Calculator'),
+                    StringStruct('FileVersion', '0.1.0'),
+                    StringStruct('InternalName', "$AppName"),
+                    StringStruct('OriginalFilename', "$AppName.exe"),
+                    StringStruct('ProductName', 'fx451m Calculator'),
+                    StringStruct('ProductVersion', '0.1.0')
+                ]
+            )
+        ]),
+        VarFileInfo([VarStruct('Translation', [0x0409, 1200])])
+    ]
+)
+"@
+        Set-Content -Path $versionFile -Value $versionContent -Encoding UTF8
+        $pyInstallerArgs += @("--version-file", $versionFile)
 
     $pyInstallerArgs += $EntryPoint
 
@@ -156,6 +199,12 @@ if ($buildAndroid) {
     if ($LASTEXITCODE -ne 0) {
         throw "Android APK build failed. Check the Flet output above for the concrete Flutter/Android error."
     }
+
+    # Kill Gradle daemon and any lingering Java/SDK processes that might hang
+    Write-Step "Cleaning up Android build processes"
+    Get-Process -Name "java" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -Name "sdkmanager" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -Name "gradle*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
     $apkCandidates = @()
     if (Test-Path "build\apk") {

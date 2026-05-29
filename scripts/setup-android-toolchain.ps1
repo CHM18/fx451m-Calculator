@@ -203,9 +203,12 @@ function Install-AndroidCommandLineTools {
         }
 
         New-Item -ItemType Directory -Path $toolsTargetRoot -Force | Out-Null
-        if (Test-Path $toolsTargetPath) {
-            Remove-Item -Path $toolsTargetPath -Recurse -Force
-        }
+        
+        # Clean up any existing cmdline-tools versions (latest, latest-1, latest-2, etc.)
+        # to avoid SDK inconsistency warnings
+        Get-ChildItem -Path $toolsTargetRoot -Directory -ErrorAction SilentlyContinue | 
+            Where-Object { $_.Name -like "latest*" } |
+            ForEach-Object { Remove-Item -Path $_.FullName -Recurse -Force }
 
         Move-Item -Path $extractedToolsPath -Destination $toolsTargetPath
         return (Join-Path $toolsTargetPath "bin\sdkmanager.bat")
