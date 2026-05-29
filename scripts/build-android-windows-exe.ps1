@@ -194,6 +194,12 @@ if ($buildAndroid) {
         throw "Android toolchain setup failed."
     }
 
+    Write-Step "Refreshing custom icon assets"
+    & $pythonExe scripts/generate_icon.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to regenerate custom icon assets."
+    }
+
     Write-Step "Building Android APK with Flet"
     & $fletExe build apk
     if ($LASTEXITCODE -ne 0) {

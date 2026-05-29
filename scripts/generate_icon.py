@@ -8,8 +8,15 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE_DIR = ROOT / "build" / "flutter" / "images"
+ASSETS_DIR = ROOT / "assets"
 ICON_PATH = IMAGE_DIR / "icon.png"
 FAVICON_PATH = IMAGE_DIR / "favicon.png"
+ASSET_ICON_PATH = ASSETS_DIR / "icon.png"
+ASSET_ICON_ANDROID_PATH = ASSETS_DIR / "icon_android.png"
+ASSET_ICON_IOS_PATH = ASSETS_DIR / "icon_ios.png"
+ASSET_ICON_WEB_PATH = ASSETS_DIR / "icon_web.png"
+ASSET_ICON_WINDOWS_PATH = ASSETS_DIR / "icon_windows.png"
+ASSET_FAVICON_PATH = ASSETS_DIR / "favicon.png"
 
 FONT_CANDIDATES = [
     Path(r"C:\Windows\Fonts\BRUSHSCI.TTF"),
@@ -187,6 +194,7 @@ def render_icon(size: int) -> Image.Image:
 
 def main() -> None:
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
     icon = render_icon(1024)
     icon.save(ICON_PATH)
@@ -194,8 +202,19 @@ def main() -> None:
     favicon = icon.resize((256, 256), Image.Resampling.LANCZOS)
     favicon.save(FAVICON_PATH)
 
+    # Mirror the generated artwork into the root assets/ folder so Flet's
+    # Android build pipeline picks up the custom icon instead of the default one.
+    icon.save(ASSET_ICON_PATH)
+    icon.resize((512, 512), Image.Resampling.LANCZOS).save(ASSET_ICON_ANDROID_PATH)
+    icon.resize((1024, 1024), Image.Resampling.LANCZOS).save(ASSET_ICON_IOS_PATH)
+    icon.resize((512, 512), Image.Resampling.LANCZOS).save(ASSET_ICON_WEB_PATH)
+    icon.resize((256, 256), Image.Resampling.LANCZOS).save(ASSET_ICON_WINDOWS_PATH)
+    favicon.save(ASSET_FAVICON_PATH)
+
     print(f"Wrote {ICON_PATH}")
     print(f"Wrote {FAVICON_PATH}")
+    print(f"Wrote {ASSET_ICON_PATH}")
+    print(f"Wrote {ASSET_ICON_ANDROID_PATH}")
 
 
 if __name__ == "__main__":
