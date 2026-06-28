@@ -5,6 +5,7 @@ Works on desktop (Windows/Mac/Linux) and can be built for Android with: flet bui
 """
 
 import math
+from decimal import Decimal, DivisionByZero, InvalidOperation, Overflow as DecimalOverflow, localcontext
 import flet as ft
 
 
@@ -28,6 +29,7 @@ MAX_DIGITS = 12
 BASE_DISPLAY_LIMITS = {"BIN": 32, "OCT": 10, "DEC": 10, "HEX": 8}
 BASE_FORMAT_BITS = {"BIN": 32, "OCT": 30, "DEC": 32, "HEX": 32}
 MAX_EXPONENT_DIGITS = 3
+DISPLAY_SIGNIFICANT_DIGITS = 12
 
 
 def count_digits(value):
@@ -71,10 +73,46 @@ def _safe_tan(x):
     return math.tan(r)
 
 
+def rounded_decimal_for_display_exponent(value, significant_digits=DISPLAY_SIGNIFICANT_DIGITS):
+    """Round Decimal to display precision before exponent limit checks."""
+    if value.is_zero() or not value.is_finite():
+        return value
+    with localcontext() as ctx:
+        ctx.prec = max(50, significant_digits + 5)
+        rounded_text = format(value, f".{significant_digits}g")
+    return Decimal(rounded_text)
+
+
 def format_decimal_number(value):
+    if isinstance(value, Decimal):
+        if value.is_zero():
+            return "0"
+        if not value.is_finite():
+            return "-inf" if value.is_signed() else "inf"
+
+        # Keep calculator-style display limits for scientific exponents.
+        rounded_value = rounded_decimal_for_display_exponent(value)
+        adjusted_exponent = rounded_value.adjusted()
+        if adjusted_exponent > 999:
+            return "-inf" if value.is_signed() else "inf"
+        if adjusted_exponent < -999:
+            return "0"
+
+        normalized = rounded_value.normalize()
+        text = format(normalized, "g")
+        if "e" in text.lower():
+            mantissa, exponent = text.lower().split("e", 1)
+            text = f"{mantissa}e{int(exponent)}"
+        return text
     if value == 0:
         return "0"
     return f"{value:.17g}"
+
+
+def to_decimal(value):
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
 
 
 def normalize_base_value(value):
@@ -163,6 +201,12 @@ def compose_scientific_parts(mantissa, exponent):
     return f"{mantissa}e{exponent}"
 
 
+def should_keep_current_on_equals(tokens, current):
+    if tokens:
+        return False
+    return bool(current and current not in {"Error", "-"})
+
+
 def toggle_exponent_mode(current, editing_exponent):
     if not current or current == "Error":
         return current, editing_exponent
@@ -221,17 +265,49 @@ def replace_last_operator(tokens, op):
 
 def calc_binary_value(a, b, op, base_mode=False):
     if op == "+":
-        return normalize_base_value(int(a) + int(b)) if base_mode else a + b
+        if base_mode:
+            return normalize_base_value(int(a) + int(b))
+        return to_decimal(a) + to_decimal(b)
     if op == "-":
-        return normalize_base_value(int(a) - int(b)) if base_mode else a - b
+        if base_mode:
+            return normalize_base_value(int(a) - int(b))
+        return to_decimal(a) - to_decimal(b)
     if op == "*":
-        return normalize_base_value(int(a) * int(b)) if base_mode else a * b
+        if base_mode:
+            return normalize_base_value(int(a) * int(b))
+        return to_decimal(a) * to_decimal(b)
     if op == "/":
         if b == 0:
             raise ValueError("Division by zero")
-        return normalize_base_value(int(int(a) / int(b))) if base_mode else a / b
+        if base_mode:
+            return normalize_base_value(int(int(a) / int(b)))
+        with localcontext() as ctx:
+            ctx.prec = 80
+            return to_decimal(a) / to_decimal(b)
     if op == "^":
-        return normalize_base_value(int(a) ** int(b)) if base_mode else a ** b
+        if base_mode:
+            return normalize_base_value(int(a) ** int(b))
+        decimal_a = to_decimal(a)
+        decimal_b = to_decimal(b)
+        integral_b = decimal_b == decimal_b.to_integral_value()
+        if integral_b:
+            exponent_int = int(decimal_b)
+            try:
+                with localcontext() as ctx:
+                    ctx.prec = 80
+                    return decimal_a ** exponent_int
+            except (DecimalOverflow, InvalidOperation):
+                if exponent_int < 0:
+                    return Decimal("0")
+                if decimal_a.is_signed() and exponent_int % 2 != 0:
+                    return Decimal("-Infinity")
+                return Decimal("Infinity")
+        try:
+            return a ** b
+        except OverflowError:
+            if a < 0 and float(b).is_integer() and int(b) % 2 != 0:
+                return -math.inf
+            return math.inf
     if op == "AND":
         return normalize_base_value(int(a) & int(b))
     if op == "OR":
@@ -241,6 +317,29 @@ def calc_binary_value(a, b, op, base_mode=False):
     if op == "XNOR":
         return normalize_base_value(~(int(a) ^ int(b)))
     raise ValueError(f"Unknown operator: {op}")
+
+
+def calc_extra_unary_value(x, func):
+    is_decimal = isinstance(x, Decimal)
+    if func == "1/x":
+        if x == 0:
+            raise ValueError("Division by zero")
+        if is_decimal:
+            with localcontext() as ctx:
+                ctx.prec = 80
+                return Decimal("1") / x
+        return 1 / x
+    if func == "sqrt":
+        if x < 0:
+            raise ValueError("Domain error")
+        if is_decimal:
+            with localcontext() as ctx:
+                ctx.prec = 80
+                return x.sqrt(context=ctx)
+        return math.sqrt(x)
+    if func == "x^2":
+        return x * x
+    raise ValueError(f"Unknown function: {func}")
 
 
 def evaluate_expression_tokens(tokens, base_mode=False):
@@ -277,8 +376,10 @@ def evaluate_expression_tokens(tokens, base_mode=False):
         else:
             if isinstance(token, (int, float)):
                 values.append(token)
+            elif isinstance(token, Decimal):
+                values.append(token)
             else:
-                values.append(float(token))
+                values.append(Decimal(str(token)))
 
     while operators:
         if operators[-1] == "(":
@@ -292,6 +393,195 @@ def evaluate_expression_tokens(tokens, base_mode=False):
 
 def convert_base_text_to_signed_decimal_text(text, base_name):
     return format_decimal_number(signed_from_base_word(parse_base_value(text, base_name)))
+
+
+def convert_standard_text_to_base_word(text):
+    cleaned = (text or "").strip()
+    if cleaned in {"", "Error"}:
+        return 0
+
+    try:
+        numeric_value = to_decimal(cleaned)
+        if not numeric_value.is_finite():
+            return 0
+        return normalize_base_value(int(numeric_value))
+    except (InvalidOperation, ValueError, OverflowError):
+        return 0
+
+
+def simulate_standard_button_sequence(buttons):
+    """Simulate normal-mode button presses for integration testing of core calculator flows."""
+    state = {
+        "current": "",
+        "display_value": "",
+        "tokens": [],
+        "editing_exponent": False,
+        "replace_on_next_input": False,
+        "last_was_equals": False,
+    }
+
+    def clear_like_ac():
+        state["current"] = "0"
+        state["display_value"] = ""
+        state["tokens"] = []
+        state["editing_exponent"] = False
+        state["replace_on_next_input"] = False
+        state["last_was_equals"] = False
+
+    def can_push_current():
+        return bool(state["current"] and state["current"] not in {"Error", "-"})
+
+    for raw_button in buttons:
+        char = str(raw_button)
+
+        if char in {"EXP", "exp"}:
+            updated_current, editing_exponent = toggle_exponent_mode(
+                state["current"], state["editing_exponent"]
+            )
+            state["current"] = updated_current
+            state["display_value"] = ""
+            state["editing_exponent"] = editing_exponent
+            state["replace_on_next_input"] = False
+            if editing_exponent:
+                state["last_was_equals"] = False
+            continue
+
+        if char == "+/-":
+            current = state["current"]
+            if not current or current == "Error":
+                continue
+
+            if state["editing_exponent"]:
+                mantissa, exponent = parse_scientific_parts(current)
+                digits = exponent.lstrip("-") or "0"
+                new_exponent = digits if exponent.startswith("-") else f"-{digits}"
+                state["current"] = compose_scientific_parts(mantissa, new_exponent)
+                state["display_value"] = ""
+                continue
+
+            if current.startswith("-"):
+                state["current"] = current[1:]
+            elif current != "0":
+                state["current"] = f"-{current}"
+            state["display_value"] = ""
+            continue
+
+        if char.isdigit() or char == ".":
+            if state["editing_exponent"]:
+                if char.isdigit():
+                    state["current"] = append_exponent_digit_to_value(state["current"], char)
+                    state["display_value"] = ""
+                continue
+
+            if state["replace_on_next_input"]:
+                state["current"] = ""
+                state["display_value"] = ""
+                state["replace_on_next_input"] = False
+
+            if state["last_was_equals"] and char.isdigit():
+                clear_like_ac()
+            state["last_was_equals"] = False
+
+            if state["current"] == "Error":
+                state["current"] = ""
+
+            if char.isdigit() and state["current"] == "0":
+                state["current"] = ""
+
+            if char == "." and "." in state["current"]:
+                continue
+            if char == "." and state["current"] == "":
+                state["current"] = "0"
+
+            updated_current, handled = append_mantissa_digit_to_value(
+                state["current"], char, max_digits=MAX_DIGITS
+            )
+            if handled:
+                state["current"] = updated_current
+                state["display_value"] = ""
+                continue
+
+            if char.isdigit() and count_digits(state["current"]) >= MAX_DIGITS:
+                continue
+
+            state["current"] += char
+            state["display_value"] = ""
+            continue
+
+        if char in {"x^y", "^", "+", "-", "*", "/"}:
+            op = "^" if char == "x^y" else char
+            if state["current"] == "Error":
+                continue
+
+            if state["editing_exponent"]:
+                state["editing_exponent"] = False
+
+            preview_value = state["display_value"] or state["current"] or "0"
+            if can_push_current():
+                preview_value = state["current"]
+                state["tokens"].append(to_decimal(state["current"]))
+                state["current"] = ""
+
+            if state["tokens"] and state["tokens"][-1] in BINARY_OPS:
+                state["tokens"][-1] = op
+                state["display_value"] = preview_value
+                state["replace_on_next_input"] = True
+                state["last_was_equals"] = False
+            elif state["tokens"]:
+                state["tokens"].append(op)
+                state["display_value"] = preview_value
+                state["replace_on_next_input"] = True
+                state["last_was_equals"] = False
+            continue
+
+        if char in {"1/x", "sqrt", "x^2"}:
+            if state["current"] and state["current"] != "Error":
+                try:
+                    result = calc_extra_unary_value(to_decimal(state["current"]), char)
+                    state["current"] = format_decimal_number(result)
+                    state["display_value"] = ""
+                    state["editing_exponent"] = False
+                except (ValueError, ZeroDivisionError, OverflowError, InvalidOperation, DivisionByZero):
+                    state["current"] = "Error"
+                    state["display_value"] = ""
+                    state["editing_exponent"] = False
+            continue
+
+        if char == "=":
+            try:
+                tokens = list(state["tokens"])
+                if should_keep_current_on_equals(tokens, state["current"]):
+                    state["display_value"] = ""
+                    state["tokens"] = []
+                    state["editing_exponent"] = False
+                    state["replace_on_next_input"] = True
+                    state["last_was_equals"] = True
+                    continue
+
+                if can_push_current():
+                    tokens.append(to_decimal(state["current"]))
+                if not tokens:
+                    continue
+                if tokens[-1] in BINARY_OPS or tokens[-1] == "(":
+                    raise ValueError("Incomplete expression")
+
+                result = evaluate_expression_tokens(tokens, base_mode=False)
+                state["current"] = format_decimal_number(result)
+                state["display_value"] = ""
+                state["tokens"] = []
+                state["editing_exponent"] = False
+                state["replace_on_next_input"] = True
+                state["last_was_equals"] = True
+            except (ValueError, ZeroDivisionError, OverflowError, InvalidOperation, DivisionByZero):
+                state["current"] = "Error"
+                state["display_value"] = ""
+                state["tokens"] = []
+                state["editing_exponent"] = False
+                state["replace_on_next_input"] = False
+                state["last_was_equals"] = False
+            continue
+
+    return state["display_value"] or state["current"] or "0"
 
 
 def main(page: ft.Page):
@@ -354,7 +644,7 @@ def main(page: ft.Page):
         "op": "",
         "first": 0.0,
         "tokens": [],
-        "memory": 0.0,
+        "memory": Decimal("0"),
         "has_memory": False,
         "mode": "Rad",
         "base_mode": "Normal",
@@ -431,7 +721,7 @@ def main(page: ft.Page):
     def current_numeric_value():
         if is_base_mode_active():
             return parse_base_integer(state["current"] or "0")
-        return float(state["current"])
+        return to_decimal(state["current"])
 
     def set_current_from_numeric(value):
         if is_base_mode_active():
@@ -683,7 +973,7 @@ def main(page: ft.Page):
             close_bracket_button.style.bgcolor = ft.Colors.GREY_200
 
     def clear_memory():
-        state["memory"] = 0.0
+        state["memory"] = Decimal("0")
         state["has_memory"] = False
 
     def update_memory_buttons():
@@ -826,8 +1116,10 @@ def main(page: ft.Page):
             else:
                 if isinstance(token, (int, float)):
                     values.append(token)
+                elif isinstance(token, Decimal):
+                    values.append(token)
                 else:
-                    values.append(float(token))
+                    values.append(Decimal(str(token)))
 
         while operators and operators[-1] in BINARY_OPS:
             top = operators[-1]
@@ -913,7 +1205,7 @@ def main(page: ft.Page):
                     state["current"] = format_number(result)
                     state["display_value"] = ""
                     state["editing_exponent"] = False
-                except (ValueError, ZeroDivisionError):
+                except (ValueError, ZeroDivisionError, OverflowError):
                     state["current"] = "Error"
                     state["display_value"] = ""
                     state["editing_exponent"] = False
@@ -985,6 +1277,14 @@ def main(page: ft.Page):
 
     def evaluate_pending_expression():
         tokens = list(state["tokens"])
+        if should_keep_current_on_equals(tokens, state["current"]):
+            state["display_value"] = ""
+            state["tokens"] = []
+            state["op"] = ""
+            state["editing_exponent"] = False
+            state["replace_on_next_input"] = True
+            state["last_was_equals"] = True
+            return
         if can_push_current():
             tokens.append(current_numeric_value())
         if not tokens:
@@ -1007,19 +1307,6 @@ def main(page: ft.Page):
     # --- Math helpers ---
     def calc_binary(a, b, op):
         return calc_binary_value(a, b, op, base_mode=is_base_mode_active())
-
-    def calc_extra_unary(x, func):
-        if func == "1/x":
-            if x == 0:
-                raise ValueError("Division by zero")
-            return 1 / x
-        elif func == "sqrt":
-            if x < 0:
-                raise ValueError("Domain error")
-            return math.sqrt(x)
-        elif func == "x^2":
-            return x * x
-        raise ValueError(f"Unknown function: {func}")
 
     def calc_unary(x, func):
         trig_direct = {"sin", "cos", "tan", "cot"}
@@ -1171,7 +1458,7 @@ def main(page: ft.Page):
 
         elif char == "M+":
             if state["current"] and state["current"] != "Error":
-                state["memory"] = state["memory"] + current_numeric_value()
+                state["memory"] = to_decimal(state["memory"]) + current_numeric_value()
                 state["has_memory"] = True
                 update_display()
 
@@ -1190,15 +1477,15 @@ def main(page: ft.Page):
         elif char in EXTRA_UNARY_FUNCS:
             if state["current"]:
                 try:
-                    numeric_value = current_numeric_value() if is_base_mode_active() else float(state["current"])
-                    result = calc_extra_unary(float(numeric_value), char)
+                    numeric_value = current_numeric_value()
+                    result = calc_extra_unary_value(numeric_value, char)
                     if is_base_mode_active():
                         state["current"] = format_result_value(normalize_base_word(int(result)))
                     else:
                         state["current"] = format_result_value(result)
                     state["display_value"] = ""
                     state["editing_exponent"] = False
-                except (ValueError, ZeroDivisionError):
+                except (ValueError, ZeroDivisionError, OverflowError, InvalidOperation, DivisionByZero):
                     state["current"] = "Error"
                     state["display_value"] = ""
                     state["editing_exponent"] = False
@@ -1207,7 +1494,7 @@ def main(page: ft.Page):
         elif char == "=":
             try:
                 evaluate_pending_expression()
-            except (ValueError, ZeroDivisionError):
+            except (ValueError, ZeroDivisionError, OverflowError):
                 state["current"] = "Error"
                 state["display_value"] = ""
                 state["tokens"] = []
@@ -1318,12 +1605,11 @@ def main(page: ft.Page):
         state["editing_exponent"] = False
         state["last_was_equals"] = False
         if entering_base_mode:
-            try:
-                numeric_value = int(float(shown_value))
-            except ValueError:
-                numeric_value = 0
             state["base_format"] = "DEC"
-            state["current"] = format_base_integer(normalize_base_word(numeric_value), "DEC")
+            state["current"] = format_base_integer(
+                convert_standard_text_to_base_word(shown_value),
+                "DEC",
+            )
         else:
             try:
                 numeric_text = convert_base_text_to_signed_decimal_text(shown_value, state["base_format"])
