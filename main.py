@@ -30,47 +30,73 @@ BASE_DISPLAY_LIMITS = {"BIN": 32, "OCT": 10, "DEC": 10, "HEX": 8}
 BASE_FORMAT_BITS = {"BIN": 32, "OCT": 30, "DEC": 32, "HEX": 32}
 MAX_EXPONENT_DIGITS = 3
 DISPLAY_SIGNIFICANT_DIGITS = 12
+ZERO_SNAP_FACTOR = 4096.0
+TRIG_ZERO_ABS_TOL = 5e-13
+TRIG_ZERO_REL_TOL = 5e-12
 
 
 def count_digits(value):
     return sum(1 for char in value if char.isdigit())
 
 
+def _snap_near_zero(value, scale=1.0):
+    tolerance = ZERO_SNAP_FACTOR * math.ulp(1.0) * max(1.0, abs(scale))
+    return 0.0 if abs(value) <= tolerance else value
+
+
+def _trig_zero_tolerance(x):
+    return max(TRIG_ZERO_ABS_TOL, TRIG_ZERO_REL_TOL * max(1.0, abs(x)))
+
+
+def _near_periodic_zero(x, period, offset=0.0):
+    delta = math.remainder(x - offset, period)
+    return abs(delta) <= _trig_zero_tolerance(x)
+
+
 def _safe_sin(x):
     """sin(x) with exact zeros at integer multiples of π."""
+    if _near_periodic_zero(x, math.pi):
+        return 0.0
+
     n = round(2 * x / math.pi)
     r = x - n * (math.pi / 2)
     n_mod = int(n) % 4
     if n_mod == 0:
-        return math.sin(r)
+        return _snap_near_zero(math.sin(r), scale=x)
     elif n_mod == 1:
         return math.cos(r)
     elif n_mod == 2:
-        return -math.sin(r)
+        return _snap_near_zero(-math.sin(r), scale=x)
     else:
         return -math.cos(r)
 
 
 def _safe_cos(x):
     """cos(x) with exact zeros at odd multiples of π/2."""
+    if _near_periodic_zero(x, math.pi, offset=(math.pi / 2)):
+        return 0.0
+
     n = round(2 * x / math.pi)
     r = x - n * (math.pi / 2)
     n_mod = int(n) % 4
     if n_mod == 0:
         return math.cos(r)
     elif n_mod == 1:
-        return -math.sin(r)
+        return _snap_near_zero(-math.sin(r), scale=x)
     elif n_mod == 2:
         return -math.cos(r)
     else:
-        return math.sin(r)
+        return _snap_near_zero(math.sin(r), scale=x)
 
 
 def _safe_tan(x):
     """tan(x) with exact zeros at integer multiples of π."""
+    if _near_periodic_zero(x, math.pi):
+        return 0.0
+
     n = round(x / math.pi)
     r = x - n * math.pi
-    return math.tan(r)
+    return _snap_near_zero(math.tan(r), scale=x)
 
 
 def rounded_decimal_for_display_exponent(value, significant_digits=DISPLAY_SIGNIFICANT_DIGITS):

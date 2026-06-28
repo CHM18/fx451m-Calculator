@@ -3,6 +3,9 @@ import math
 from decimal import Decimal
 
 from main import (
+    _safe_cos,
+    _safe_sin,
+    _safe_tan,
     append_exponent_digit_to_value,
     append_mantissa_digit_to_value,
     calc_binary_value,
@@ -25,6 +28,40 @@ from main import (
 
 
 class CalculatorHelperTests(unittest.TestCase):
+    def test_safe_sin_is_exact_zero_for_integer_pi_multiples(self):
+        for k in [0, 1, 2, 7, 1234, -1, -9, -777]:
+            self.assertEqual(_safe_sin(k * math.pi), 0.0)
+
+    def test_safe_sin_snaps_display_rounded_two_pi_to_zero(self):
+        # 2*pi rounded to 12 significant digits as shown on display.
+        self.assertEqual(_safe_sin(6.28318530718), 0.0)
+
+    def test_safe_sin_is_exact_zero_for_display_rounded_n_pi_up_to_50(self):
+        for n in range(0, 51):
+            rounded_input = float(f"{n * math.pi:.12g}")
+            self.assertEqual(_safe_sin(rounded_input), 0.0)
+
+    def test_safe_tan_is_exact_zero_for_integer_pi_multiples(self):
+        for k in [0, 1, 2, 7, 1234, -1, -9, -777]:
+            self.assertEqual(_safe_tan(k * math.pi), 0.0)
+
+    def test_safe_tan_snaps_display_rounded_two_pi_to_zero(self):
+        self.assertEqual(_safe_tan(6.28318530718), 0.0)
+
+    def test_safe_tan_is_exact_zero_for_display_rounded_n_pi_up_to_50(self):
+        for n in range(0, 51):
+            rounded_input = float(f"{n * math.pi:.12g}")
+            self.assertEqual(_safe_tan(rounded_input), 0.0)
+
+    def test_safe_cos_is_exact_zero_for_odd_half_pi_multiples(self):
+        for k in [0, 1, 2, 7, 1234, -1, -9, -777]:
+            x = (2 * k + 1) * math.pi / 2
+            self.assertEqual(_safe_cos(x), 0.0)
+
+    def test_safe_sin_does_not_snap_nearby_nonzero_value(self):
+        x = 10 * math.pi + 1e-9
+        self.assertNotEqual(_safe_sin(x), 0.0)
+
     def test_signed_from_base_word_uses_twos_complement(self):
         self.assertEqual(signed_from_base_word(0xFFFFFFFF), -1)
         self.assertEqual(signed_from_base_word(0x80000000), -2147483648)
