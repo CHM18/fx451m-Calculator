@@ -230,6 +230,49 @@ function Set-UserEnvironmentVariable {
     Set-Item -Path "Env:$Name" -Value $Value
 }
 
+function Get-RequiredAndroidSdkPaths {
+    param(
+        [string]$SdkRoot,
+        [string]$JavaHome,
+        [int]$PlatformApi,
+        [string]$BuildToolsVersion
+    )
+
+    return @(
+        (Join-Path $SdkRoot "platform-tools"),
+        (Join-Path $SdkRoot "platforms\android-$PlatformApi"),
+        (Join-Path $SdkRoot "build-tools\$BuildToolsVersion"),
+        (Join-Path $JavaHome "bin\java.exe")
+    )
+}
+
+function Get-MissingPaths {
+    param([string[]]$Paths)
+
+    return @($Paths | Where-Object { -not (Test-Path $_) })
+}
+
+function Test-SdkManagerRemoteFailure {
+    param([string]$ErrorText)
+
+    return $ErrorText -match "ProductDetails\$CpuArchitecture"
+}
+
+function Invoke-SdkManagerWithYInput {
+    param(
+        [string]$SdkManager,
+        [string]$SdkRoot,
+        [string[]]$Arguments
+    )
+
+    $output = (1..200 | ForEach-Object { "y" }) | & $SdkManager "--sdk_root=$SdkRoot" @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+    return [PSCustomObject]@{
+        Output = @($output)
+        ExitCode = $exitCode
+    }
+}
+
 Write-Step "Installing Java"
 $javaHome = Install-TemurinJdk -InstallRoot $JavaInstallRoot -RequiredMajorVersion $JdkMajorVersion -Reinstall:$Force.IsPresent
 
@@ -252,26 +295,46 @@ $packages = @(
     "build-tools;$BuildToolsVersion"
 )
 
-Write-Step "Accepting Android SDK licenses"
-(1..200 | ForEach-Object { "y" }) | & $sdkManager "--sdk_root=$AndroidSdkRoot" --licenses
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed while accepting Android SDK licenses."
+$expectedPaths = Get-RequiredAndroidSdkPaths -SdkRoot $AndroidSdkRoot -JavaHome $javaHome -PlatformApi $PlatformApi -BuildToolsVersion $BuildToolsVersion
+$missingPaths = @(Get-MissingPaths -Paths $expectedPaths)
+
+if ($missingPaths.Count -eq 0) {
+    Write-Step "Required Android SDK packages already installed; skipping remote sdkmanager operations"
 }
+else {
+    Write-Step "Accepting Android SDK licenses"
+    $licenseResult = Invoke-SdkManagerWithYInput -SdkManager $sdkManager -SdkRoot $AndroidSdkRoot -Arguments @("--licenses")
+    if ($licenseResult.ExitCode -ne 0) {
+        $licenseErrorText = ($licenseResult.Output -join [Environment]::NewLine)
+        if (Test-SdkManagerRemoteFailure -ErrorText $licenseErrorText) {
+            throw (
+                "Android cmdline-tools remote operations are currently broken on this machine: sdkmanager failed with " +
+                "ProductDetails`$CpuArchitecture while loading the remote repository. " +
+                "The required SDK packages are also missing:`n$($missingPaths -join "`n")`n`n" +
+                "Workaround: install the missing SDK components via Android Studio's SDK Manager or another working sdkmanager, then rerun this script."
+            )
+        }
 
-Write-Step "Installing Android SDK packages"
-& $sdkManager "--sdk_root=$AndroidSdkRoot" @packages
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed while installing Android SDK packages."
+        throw "Failed while accepting Android SDK licenses.`n$licenseErrorText"
+    }
+
+    Write-Step "Installing Android SDK packages"
+    $installResult = Invoke-SdkManagerWithYInput -SdkManager $sdkManager -SdkRoot $AndroidSdkRoot -Arguments $packages
+    if ($installResult.ExitCode -ne 0) {
+        $installErrorText = ($installResult.Output -join [Environment]::NewLine)
+        if (Test-SdkManagerRemoteFailure -ErrorText $installErrorText) {
+            throw (
+                "Android cmdline-tools remote operations are currently broken on this machine: sdkmanager failed with " +
+                "ProductDetails`$CpuArchitecture while loading the remote repository. " +
+                "The required SDK packages are still missing:`n$($missingPaths -join "`n")`n`n" +
+                "Workaround: install the missing SDK components via Android Studio's SDK Manager or another working sdkmanager, then rerun this script."
+            )
+        }
+
+        throw "Failed while installing Android SDK packages.`n$installErrorText"
+    }
 }
-
-$expectedPaths = @(
-    (Join-Path $AndroidSdkRoot "platform-tools"),
-    (Join-Path $AndroidSdkRoot "platforms\android-$PlatformApi"),
-    (Join-Path $AndroidSdkRoot "build-tools\$BuildToolsVersion"),
-    (Join-Path $javaHome "bin\java.exe")
-)
-
-$missingPaths = @($expectedPaths | Where-Object { -not (Test-Path $_) })
+$missingPaths = @(Get-MissingPaths -Paths $expectedPaths)
 if ($missingPaths.Count -gt 0) {
     throw "Android setup completed with missing expected paths:`n$($missingPaths -join "`n")"
 }
