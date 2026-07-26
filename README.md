@@ -117,4 +117,3 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 ## To Do:
 - write unit tests
 - add financial and statistical functions (extra switch)
-- add log, ln, e^x and x!
