@@ -186,6 +186,42 @@ class CalculatorHelperTests(unittest.TestCase):
         expected = int(Decimal("1e310")) & 0xFFFFFFFF
         self.assertEqual(result, expected)
 
+    def test_log_returns_base_10_logarithm(self):
+        self.assertAlmostEqual(calc_extra_unary_value(100, "log"), 2.0)
+
+    def test_log_rejects_non_positive_domain(self):
+        with self.assertRaises(ValueError):
+            calc_extra_unary_value(0, "log")
+        with self.assertRaises(ValueError):
+            calc_extra_unary_value(-5, "log")
+
+    def test_ln_returns_natural_logarithm(self):
+        self.assertAlmostEqual(calc_extra_unary_value(math.e, "ln"), 1.0)
+
+    def test_ln_rejects_non_positive_domain(self):
+        with self.assertRaises(ValueError):
+            calc_extra_unary_value(0, "ln")
+        with self.assertRaises(ValueError):
+            calc_extra_unary_value(-1, "ln")
+
+    def test_e_to_the_x_of_zero_is_one(self):
+        self.assertAlmostEqual(calc_extra_unary_value(0, "e^x"), 1.0)
+
+    def test_e_to_the_x_overflows_for_huge_input(self):
+        with self.assertRaises(OverflowError):
+            calc_extra_unary_value(1e6, "e^x")
+
+    def test_factorial_of_five_is_120(self):
+        self.assertEqual(calc_extra_unary_value(5, "x!"), 120)
+
+    def test_factorial_rejects_negative_values(self):
+        with self.assertRaises(ValueError):
+            calc_extra_unary_value(-1, "x!")
+
+    def test_factorial_rejects_non_integer_values(self):
+        with self.assertRaises(ValueError):
+            calc_extra_unary_value(2.5, "x!")
+
 
 class CalculatorUiSequenceIntegrationTests(unittest.TestCase):
     def test_e2e_large_sqrt_sequence(self):

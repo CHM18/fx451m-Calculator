@@ -365,6 +365,20 @@ def calc_extra_unary_value(x, func):
         return math.sqrt(x)
     if func == "x^2":
         return x * x
+    if func == "log":
+        if x <= 0:
+            raise ValueError("Domain error")
+        return math.log10(x)
+    if func == "ln":
+        if x <= 0:
+            raise ValueError("Domain error")
+        return math.log(x)
+    if func == "e^x":
+        return math.exp(x)
+    if func == "x!":
+        if x < 0 or x != int(x):
+            raise ValueError("Domain error")
+        return math.factorial(int(x))
     raise ValueError(f"Unknown function: {func}")
 
 
@@ -613,7 +627,7 @@ def simulate_standard_button_sequence(buttons):
 def main(page: ft.Page):
     page.title = "fx451m Calculator"
     page.window.width = 420
-    page.window.height = 772
+    page.window.height = 825
     page.padding = 0
     page.bgcolor = ft.Colors.BLACK
 
@@ -686,7 +700,7 @@ def main(page: ft.Page):
         "sinh", "cosh", "tanh", "coth",
         "asinh", "acosh", "atanh", "acoth",
     }
-    EXTRA_UNARY_FUNCS = {"1/x", "sqrt", "x^2"}
+    EXTRA_UNARY_FUNCS = {"1/x", "sqrt", "x^2", "log", "ln", "e^x", "x!"}
     CONSTANTS = {
         "CONST_PI": math.pi,
         "CONST_C": 299792458,
@@ -1606,8 +1620,16 @@ def main(page: ft.Page):
                 else ft.Colors.with_opacity(0.0, ft.Colors.GREY_200)
             )
 
-        base_normal_label.color = ft.Colors.GREY_500 if is_base_mode else ft.Colors.BLACK
-        base_bases_label.color = ft.Colors.BLACK if is_base_mode else ft.Colors.GREY_500
+        base_normal_label.color = (
+            ft.Colors.with_opacity(0.65, ft.Colors.ORANGE_700)
+            if is_base_mode
+            else ft.Colors.ORANGE_700
+        )
+        base_bases_label.color = (
+            ft.Colors.GREEN_700
+            if is_base_mode
+            else ft.Colors.with_opacity(0.65, ft.Colors.GREEN_700)
+        )
         base_track.content.alignment = (
             ft.MainAxisAlignment.END if is_base_mode else ft.MainAxisAlignment.START
         )
@@ -1655,7 +1677,7 @@ def main(page: ft.Page):
             function_button_texts[index].weight = (
                 ft.FontWeight.BOLD if is_base_mode_active() and label in BASE_SYSTEMS else ft.FontWeight.NORMAL
             )
-            button.style.bgcolor = ft.Colors.GREEN_200 if is_base_mode_active() else ft.Colors.GREY_200
+            button.style.bgcolor = ft.Colors.GREEN_200 if is_base_mode_active() else ft.Colors.ORANGE_200
             if is_base_mode_active() and label == state["base_format"]:
                 button.style.bgcolor = ft.Colors.GREEN_400
             button.data = f"FUNC_{index}"
@@ -1772,8 +1794,8 @@ def main(page: ft.Page):
             ),
         )
 
-    OP_BG = ft.Colors.ORANGE_200
-    EQ_BG = ft.Colors.BLUE_200
+    OP_BG = ft.Colors.BLUE_200
+    EQ_BG = ft.Colors.BLUE_700
     CLR_BG = ft.Colors.RED_200
     TOP_BG = ft.Colors.BROWN_100
     SWITCH_BG = ft.Colors.GREY_200
@@ -1825,6 +1847,10 @@ def main(page: ft.Page):
     const_c_button = btn("c", data="CONST_C")
     const_h_button = btn("ℏ", data="CONST_H")
     const_g_button = btn("G", data="CONST_G")
+    log_button = btn("log", data="log")
+    ln_button = btn("ln", data="ln")
+    exp_e_button = btn("eˣ", data="e^x")
+    factorial_button = btn("x!", data="x!")
     function_button_texts = [
         ft.Text("", size=17, weight=ft.FontWeight.NORMAL, text_align=ft.TextAlign.CENTER, no_wrap=True)
         for _ in range(16)
@@ -1855,6 +1881,7 @@ def main(page: ft.Page):
         spacing=8,
     )
     scientific_top_row = ft.Row([reciprocal_button, sqrt_button, square_button, power_button], spacing=8)
+    scientific_log_row = ft.Row([log_button, ln_button, exp_e_button, factorial_button], spacing=8)
     scientific_row_1 = ft.Row(function_buttons[0:4], spacing=8)
     scientific_row_2 = ft.Row(function_buttons[4:8], spacing=8)
     scientific_row_3 = ft.Row(function_buttons[8:12], spacing=8)
@@ -1865,6 +1892,10 @@ def main(page: ft.Page):
         sqrt_button,
         square_button,
         power_button,
+        log_button,
+        ln_button,
+        exp_e_button,
+        factorial_button,
         *function_buttons,
         const_pi_button,
         const_c_button,
@@ -1936,6 +1967,7 @@ def main(page: ft.Page):
                 keypad_row_1_3,
                 keypad_row_0_equals,
                 scientific_top_row,
+                scientific_log_row,
                 scientific_row_1,
                 scientific_row_2,
                 scientific_row_3,
@@ -1970,6 +2002,7 @@ def main(page: ft.Page):
             spacing=8,
             controls=[
                 scientific_top_row,
+                scientific_log_row,
                 scientific_row_1,
                 scientific_row_2,
                 scientific_row_3,
@@ -2028,12 +2061,14 @@ def main(page: ft.Page):
         top_spacer.height = 0
         top_display_band.padding = ft.padding.Padding(0, 2, 0, 4) if is_landscape else ft.padding.Padding(0, 6, 0, 8)
         switch_section.padding = ft.padding.Padding(5, 2, 5, 2) if is_landscape else ft.padding.Padding(6, 4, 6, 4)
+        portrait_keypad_section.padding = 8 if is_landscape else 6
+        portrait_keypad_section.content.spacing = 8 if is_landscape else 6
         landscape_left_section.padding = 4 if is_landscape else 8
         landscape_right_section.padding = 4 if is_landscape else 8
         landscape_left_section.content.spacing = 5 if is_landscape else 8
         landscape_right_section.content.spacing = 7 if is_landscape else 8
         left_button_height = 39 if is_landscape else 45
-        scientific_button_height = 47 if is_landscape else 45
+        scientific_button_height = 47 if is_landscape else 40
         for button in landscape_left_buttons:
             button.height = left_button_height
         for button in landscape_scientific_buttons:
