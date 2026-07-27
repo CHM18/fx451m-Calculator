@@ -5,6 +5,9 @@ param(
     [int]$JdkMajorVersion = 17,
     [int]$PlatformApi = 35,
     [string]$BuildToolsVersion = "35.0.0",
+    [int]$NetworkMaxRetries = 4,
+    [int]$NetworkInitialBackoffSeconds = 2,
+    [int]$NetworkMinIntervalMilliseconds = 300,
     [switch]$Force
 )
 
@@ -58,6 +61,84 @@ function Add-PathEntry {
     }
 }
 
+$script:LastNetworkRequestAt = $null
+
+function Wait-NetworkRateLimit {
+    param([int]$MinIntervalMilliseconds)
+
+    if ($script:LastNetworkRequestAt -eq $null) {
+        return
+    }
+
+    $elapsedMilliseconds = ([DateTime]::UtcNow - $script:LastNetworkRequestAt).TotalMilliseconds
+    if ($elapsedMilliseconds -lt $MinIntervalMilliseconds) {
+        $remaining = [Math]::Ceiling($MinIntervalMilliseconds - $elapsedMilliseconds)
+        Start-Sleep -Milliseconds ([int]$remaining)
+    }
+}
+
+function Get-RetryDelaySeconds {
+    param(
+        [System.Exception]$Exception,
+        [int]$Attempt,
+        [int]$InitialBackoffSeconds
+    )
+
+    $response = $Exception.Response
+    if ($response -and $response.Headers) {
+        $retryAfter = $response.Headers["Retry-After"]
+        if (-not [string]::IsNullOrWhiteSpace($retryAfter)) {
+            $parsedSeconds = 0
+            if ([int]::TryParse($retryAfter, [ref]$parsedSeconds) -and $parsedSeconds -gt 0) {
+                return $parsedSeconds
+            }
+        }
+    }
+
+    $baseDelay = $InitialBackoffSeconds * [Math]::Pow(2, [Math]::Max(0, $Attempt - 1))
+    $cappedDelay = [Math]::Min([int][Math]::Ceiling($baseDelay), 30)
+    return $cappedDelay
+}
+
+function Test-RetryableNetworkError {
+    param([System.Exception]$Exception)
+
+    $response = $Exception.Response
+    if (-not $response -or -not $response.StatusCode) {
+        return $true
+    }
+
+    $statusCode = [int]$response.StatusCode
+    return $statusCode -in @(408, 429, 500, 502, 503, 504)
+}
+
+function Invoke-NetworkWithRetry {
+    param(
+        [scriptblock]$Action,
+        [string]$OperationName,
+        [int]$MaxRetries,
+        [int]$InitialBackoffSeconds,
+        [int]$MinIntervalMilliseconds
+    )
+
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        try {
+            Wait-NetworkRateLimit -MinIntervalMilliseconds $MinIntervalMilliseconds
+            $script:LastNetworkRequestAt = [DateTime]::UtcNow
+            return & $Action
+        }
+        catch {
+            if (-not (Test-RetryableNetworkError -Exception $_.Exception) -or $attempt -eq $MaxRetries) {
+                throw
+            }
+
+            $delaySeconds = Get-RetryDelaySeconds -Exception $_.Exception -Attempt $attempt -InitialBackoffSeconds $InitialBackoffSeconds
+            Write-Warning "$OperationName failed on attempt $attempt/$MaxRetries. Retrying in $delaySeconds seconds."
+            Start-Sleep -Seconds $delaySeconds
+        }
+    }
+}
+
 function Invoke-DownloadFile {
     param(
         [string]$Uri,
@@ -69,13 +150,17 @@ function Invoke-DownloadFile {
         New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
     }
 
-    Invoke-WebRequest -Uri $Uri -OutFile $DestinationPath
+    Invoke-NetworkWithRetry -OperationName "Downloading $Uri" -MaxRetries $NetworkMaxRetries -InitialBackoffSeconds $NetworkInitialBackoffSeconds -MinIntervalMilliseconds $NetworkMinIntervalMilliseconds -Action {
+        Invoke-WebRequest -Uri $Uri -OutFile $DestinationPath
+    }
 }
 
 function Get-LatestCommandLineToolsUri {
     Write-Step "Resolving latest Android command-line tools package"
 
-    $repositoryXml = Invoke-WebRequest -Uri "https://dl.google.com/android/repository/repository2-1.xml" -UseBasicParsing
+    $repositoryXml = Invoke-NetworkWithRetry -OperationName "Fetching Android repository manifest" -MaxRetries $NetworkMaxRetries -InitialBackoffSeconds $NetworkInitialBackoffSeconds -MinIntervalMilliseconds $NetworkMinIntervalMilliseconds -Action {
+        Invoke-WebRequest -Uri "https://dl.google.com/android/repository/repository2-1.xml" -UseBasicParsing
+    }
     $matches = [regex]::Matches($repositoryXml.Content, "commandlinetools-win-(\d+)_latest\.zip")
 
     if ($matches.Count -eq 0) {

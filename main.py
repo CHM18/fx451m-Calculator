@@ -626,10 +626,22 @@ def simulate_standard_button_sequence(buttons):
 
 def main(page: ft.Page):
     page.title = "fx451m Calculator"
-    page.window.width = 420
-    page.window.height = 825
     page.padding = 0
     page.bgcolor = ft.Colors.BLACK
+
+    windows_landscape_width = 720
+    windows_landscape_height = 380
+    windows_portrait_width = 420
+    windows_portrait_height = 755
+
+    if page.platform == ft.PagePlatform.WINDOWS:
+        # Start desktop in landscape and keep a fixed size.
+        page.window.width = windows_landscape_width
+        page.window.height = windows_landscape_height
+        page.window.resizable = True
+    else:
+        page.window.width = windows_portrait_width
+        page.window.height = windows_portrait_height
 
     # Try to set a native window icon on Windows desktop builds.
     try:
@@ -651,6 +663,7 @@ def main(page: ft.Page):
         pass
 
     is_android = page.platform == ft.PagePlatform.ANDROID
+    is_windows = page.platform == ft.PagePlatform.WINDOWS
     haptic_feedback = ft.HapticFeedback() if is_android else None
 
     async def trigger_key_haptic_feedback():
@@ -1550,8 +1563,8 @@ def main(page: ft.Page):
             clear_entry()
 
     # --- Mode toggles ---
-    mode_rad_label = ft.Text("Rad", size=11, weight=ft.FontWeight.BOLD)
-    mode_deg_label = ft.Text("Deg", size=11, weight=ft.FontWeight.BOLD)
+    mode_rad_label = ft.Text("Rad", size=11, weight=ft.FontWeight.BOLD, no_wrap=True)
+    mode_deg_label = ft.Text("Deg", size=11, weight=ft.FontWeight.BOLD, no_wrap=True)
     mode_thumb = ft.Container(
         width=22,
         height=20,
@@ -1572,8 +1585,8 @@ def main(page: ft.Page):
         padding=ft.padding.Padding(3, 2, 3, 2),
     )
 
-    base_normal_label = ft.Text("Std", size=11, weight=ft.FontWeight.BOLD)
-    base_bases_label = ft.Text("Base", size=11, weight=ft.FontWeight.BOLD)
+    base_normal_label = ft.Text("Std", size=11, weight=ft.FontWeight.BOLD, no_wrap=True)
+    base_bases_label = ft.Text("Base", size=11, weight=ft.FontWeight.BOLD, no_wrap=True)
     base_thumb = ft.Container(
         width=22,
         height=20,
@@ -1712,10 +1725,10 @@ def main(page: ft.Page):
         on_click=toggle_mode,
         alignment=ft.Alignment(0, 0),
         expand=True,
-        height=32,
+        height=34,
         bgcolor=ft.Colors.with_opacity(0.0, ft.Colors.GREY_200),
         border_radius=6,
-        padding=ft.padding.Padding(18, 2, 18, 2),
+        padding=ft.padding.Padding(12, 2, 12, 2),
     )
 
     base_mode_control = ft.Container(
@@ -1746,11 +1759,51 @@ def main(page: ft.Page):
         on_click=toggle_base_mode,
         alignment=ft.Alignment(0, 0),
         expand=True,
-        height=32,
+        height=34,
         bgcolor=ft.Colors.with_opacity(0.0, ft.Colors.GREY_200),
         border_radius=6,
-        padding=ft.padding.Padding(18, 2, 18, 2),
+        padding=ft.padding.Padding(12, 2, 12, 2),
     )
+
+    orientation_toggle_icon = ft.Icon(
+        ft.Icons.SCREEN_ROTATION,
+        size=18,
+        color=ft.Colors.BLACK,
+    )
+
+    orientation_toggle_control = ft.Container(
+        width=42,
+        height=34,
+        alignment=ft.Alignment(0, 0),
+        border_radius=6,
+        bgcolor=ft.Colors.GREY_300,
+        content=orientation_toggle_icon,
+        visible=is_windows,
+    )
+
+    def update_orientation_toggle_control():
+        if not is_windows:
+            return
+        is_landscape = bool(page.width and page.height and page.width > page.height)
+        orientation_toggle_icon.name = ft.Icons.SCREEN_ROTATION
+        orientation_toggle_control.bgcolor = ft.Colors.ORANGE_200 if is_landscape else ft.Colors.BLUE_200
+        orientation_toggle_control.tooltip = (
+            "Switch to portrait" if is_landscape else "Switch to landscape"
+        )
+
+    def toggle_window_orientation(_):
+        if not is_windows:
+            return
+        is_landscape = bool(page.width and page.height and page.width > page.height)
+        if is_landscape:
+            page.window.width = windows_portrait_width
+            page.window.height = windows_portrait_height
+        else:
+            page.window.width = windows_landscape_width
+            page.window.height = windows_landscape_height
+        apply_responsive_layout()
+
+    orientation_toggle_control.on_click = toggle_window_orientation
 
     refresh_mode_control()
 
@@ -1948,10 +2001,14 @@ def main(page: ft.Page):
         ),
     )
 
+    switch_row_controls = [mode_control, base_mode_control]
+    if is_windows:
+        switch_row_controls.append(orientation_toggle_control)
+
     switch_section = ft.Container(
         bgcolor=SWITCH_BG,
         padding=ft.padding.Padding(6, 4, 6, 4),
-        content=ft.Row([mode_control, base_mode_control], spacing=8),
+        content=ft.Row(switch_row_controls, spacing=8),
     )
 
     portrait_keypad_section = ft.Container(
@@ -2013,13 +2070,21 @@ def main(page: ft.Page):
     )
 
     layout_host = ft.Container(expand=True)
+    safe_area_padding = (
+        ft.padding.Padding(10, 8, 10, 8)
+        if is_windows
+        else ft.padding.Padding(10, 0, 10, 10)
+    )
     safe_area = ft.SafeArea(
-        minimum_padding=ft.padding.Padding(10, 0, 10, 10),
+        minimum_padding=safe_area_padding,
         content=ft.Container(
             content=layout_host,
             border=ft.Border.all(1, ft.Colors.GREY_700),
         ),
     )
+
+    landscape_left_expand = 5
+    landscape_right_expand = 4
 
     def build_portrait_layout():
         return ft.Column(
@@ -2038,7 +2103,7 @@ def main(page: ft.Page):
             spacing=8,
             controls=[
                 ft.Container(
-                    expand=5,
+                    expand=landscape_left_expand,
                     content=ft.Column(
                         expand=True,
                         spacing=2,
@@ -2050,25 +2115,34 @@ def main(page: ft.Page):
                     ),
                 ),
                 ft.Container(
-                    expand=4,
+                    expand=landscape_right_expand,
                     content=landscape_right_section,
                 ),
             ],
         )
 
     def apply_responsive_layout():
+        nonlocal landscape_left_expand, landscape_right_expand
         is_landscape = bool(page.width and page.height and page.width > page.height)
         top_spacer.height = 0
-        top_display_band.padding = ft.padding.Padding(0, 2, 0, 4) if is_landscape else ft.padding.Padding(0, 6, 0, 8)
-        switch_section.padding = ft.padding.Padding(5, 2, 5, 2) if is_landscape else ft.padding.Padding(6, 4, 6, 4)
+        update_orientation_toggle_control()
+        top_section.padding = ft.padding.Padding(0, 0, 0, 1) if is_landscape else ft.padding.Padding(0, 0, 0, 2)
+        top_display_band.padding = ft.padding.Padding(0, 1, 0, 2) if is_landscape else ft.padding.Padding(0, 6, 0, 8)
+        switch_section.padding = ft.padding.Padding(4, 1, 4, 1) if is_landscape else ft.padding.Padding(6, 4, 6, 4)
         portrait_keypad_section.padding = 8 if is_landscape else 6
         portrait_keypad_section.content.spacing = 8 if is_landscape else 6
         landscape_left_section.padding = 4 if is_landscape else 8
         landscape_right_section.padding = 4 if is_landscape else 8
         landscape_left_section.content.spacing = 5 if is_landscape else 8
-        landscape_right_section.content.spacing = 7 if is_landscape else 8
+        landscape_right_section.content.spacing = 4 if is_landscape else 8
+        if is_landscape and is_windows:
+            landscape_left_expand = 1
+            landscape_right_expand = 1
+        else:
+            landscape_left_expand = 5
+            landscape_right_expand = 4
         left_button_height = 39 if is_landscape else 45
-        scientific_button_height = 47 if is_landscape else 40
+        scientific_button_height = 42 if is_landscape else 40
         for button in landscape_left_buttons:
             button.height = left_button_height
         for button in landscape_scientific_buttons:
