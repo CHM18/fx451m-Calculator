@@ -39,6 +39,53 @@ def count_digits(value):
     return sum(1 for char in value if char.isdigit())
 
 
+def split_sign_prefix(value):
+    text = value or ""
+    if text.startswith("-"):
+        return "-", text[1:]
+    return "", text
+
+
+def group_digits_for_display(value, separator="\u200A"):
+    text = value or ""
+    if text in {"", "Error"}:
+        return text
+
+    integer_part, dot, fractional_part = text.partition(".")
+
+    if integer_part.isdigit():
+        integer_groups = []
+        remaining = integer_part
+        while remaining:
+            integer_groups.append(remaining[-3:])
+            remaining = remaining[:-3]
+        integer_part = separator.join(reversed(integer_groups))
+
+    if not dot:
+        return integer_part
+
+    if not fractional_part:
+        return f"{integer_part}."
+
+    if not fractional_part.isdigit():
+        return text
+
+    fractional_groups = [
+        fractional_part[index:index + 3]
+        for index in range(0, len(fractional_part), 3)
+    ]
+    return f"{integer_part}.{separator.join(fractional_groups)}"
+
+
+def _plain_decimal_text(value):
+    text = format(value, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    if text in {"", "-0", "+0"}:
+        return "0"
+    return text
+
+
 def _snap_near_zero(value, scale=1.0):
     tolerance = ZERO_SNAP_FACTOR * math.ulp(1.0) * max(1.0, abs(scale))
     return 0.0 if abs(value) <= tolerance else value
@@ -123,6 +170,11 @@ def format_decimal_number(value):
             return "-inf" if value.is_signed() else "inf"
         if adjusted_exponent < -999:
             return "0"
+
+        # Prefer plain decimal when the rounded value fits the 12-digit display.
+        plain_text = _plain_decimal_text(rounded_value)
+        if count_digits(plain_text.lstrip("-")) <= DISPLAY_SIGNIFICANT_DIGITS:
+            return plain_text
 
         normalized = rounded_value.normalize()
         text = format(normalized, "g")
@@ -638,7 +690,7 @@ def main(page: ft.Page):
         # Start desktop in landscape and keep a fixed size.
         page.window.width = windows_landscape_width
         page.window.height = windows_landscape_height
-        page.window.resizable = True
+        page.window.resizable = False
     else:
         page.window.width = windows_portrait_width
         page.window.height = windows_portrait_height
@@ -665,6 +717,7 @@ def main(page: ft.Page):
     is_android = page.platform == ft.PagePlatform.ANDROID
     is_windows = page.platform == ft.PagePlatform.WINDOWS
     haptic_feedback = ft.HapticFeedback() if is_android else None
+    clipboard_service = ft.Clipboard()
 
     async def trigger_key_haptic_feedback():
         if haptic_feedback is None:
@@ -862,15 +915,7 @@ def main(page: ft.Page):
             return "Error", ""
         lower_value = value.lower()
         if "e" not in lower_value:
-            # Preserve explicit decimal input as the user types it,
-            # including trailing zeros after a decimal point.
-            if "." in value:
-                return value, ""
-            if not value.endswith("."):
-                try:
-                    value = f"{float(value):.12g}"
-                except ValueError:
-                    pass
+            # Preserve explicit input exactly as typed for full 12-digit visibility.
             return value, ""
 
         mantissa, exponent = lower_value.split("e", 1)
@@ -895,12 +940,21 @@ def main(page: ft.Page):
         visible=False,
     )
 
+    sign_indicator = ft.Text(
+        value="",
+        size=34,
+        weight=ft.FontWeight.BOLD,
+        color=ft.Colors.BLACK,
+        visible=False,
+    )
+
     mantissa_display = ft.Text(
         value="0",
         text_align=ft.TextAlign.CENTER,
         size=34,
         weight=ft.FontWeight.BOLD,
         color=ft.Colors.BLACK,
+        no_wrap=True,
     )
 
     binary_display_text = ft.Text(
@@ -913,55 +967,79 @@ def main(page: ft.Page):
         visible=True,
     )
 
-    exponent_display = ft.Text(
+    exponent_sign_display = ft.Text(
         value="",
         text_align=ft.TextAlign.LEFT,
         size=16,
         weight=ft.FontWeight.BOLD,
         color=ft.Colors.BLACK,
+        no_wrap=True,
     )
 
-    standard_display = ft.Row(
+    exponent_digits_display = ft.Text(
+        value="",
+        text_align=ft.TextAlign.LEFT,
+        size=16,
+        weight=ft.FontWeight.BOLD,
+        color=ft.Colors.BLACK,
+        no_wrap=True,
+    )
+
+    exponent_row = ft.Row(
         [
-            ft.Container(content=mantissa_display, alignment=ft.Alignment(1, 0), expand=True),
-            ft.Container(
-                content=exponent_display,
-                width=42,
-                alignment=ft.Alignment(-1, -0.75),
-            ),
+            ft.Container(content=exponent_sign_display, width=6, alignment=ft.Alignment(-1, 0)),
+            ft.Container(content=exponent_digits_display, alignment=ft.Alignment(-1, 0)),
         ],
-        alignment=ft.MainAxisAlignment.CENTER,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
         spacing=0,
+    )
+
+    # Fixed pixel geometry for the display content area. Using absolute
+    # positioning (top/left/right) instead of nested expand/alignment
+    # containers keeps the mantissa, exponent, and memory/sign indicators
+    # in a stable, predictable position regardless of digit count.
+    DISPLAY_CONTENT_WIDTH = 320
+    DISPLAY_CONTENT_HEIGHT = 54
+    LEFT_LANE_RESERVED = 2
+    EXPONENT_ZONE_RESERVED = 34
+
+    # NOTE: `expand=True` only works for flex children of Row/Column; Stack
+    # children must be stretched explicitly via left/top/right/bottom=0
+    # (Positioned.fill equivalent). Without this, these containers were
+    # auto-sizing to their own content instead of filling the display,
+    # so the right-alignment had no real boundary and the mantissa could
+    # overflow the Stack's right edge (clipped) while still leaving a gap
+    # on the left.
+    standard_display = ft.Container(
+        content=mantissa_display,
+        alignment=ft.Alignment(1, 0),
+        padding=ft.padding.Padding(LEFT_LANE_RESERVED, 0, EXPONENT_ZONE_RESERVED, 0),
+        left=0,
+        top=0,
+        right=0,
+        bottom=0,
     )
 
     binary_display = ft.Container(
         content=binary_display_text,
-        alignment=ft.Alignment(1, 0),
+        alignment=ft.Alignment(1, 1),
+        padding=ft.padding.Padding(LEFT_LANE_RESERVED, 0, 6, 0),
+        left=0,
+        top=0,
+        right=0,
+        bottom=0,
         visible=False,
     )
 
-    display = ft.Row(
+    display = ft.Stack(
         [
-            ft.Container(
-                content=memory_indicator,
-                width=18,
-                alignment=ft.Alignment(-1, 0),
-            ),
-            ft.Container(
-                expand=True,
-                content=ft.Stack(
-                    [
-                        ft.Container(content=standard_display, alignment=ft.Alignment(1, 0), expand=True),
-                        ft.Container(content=binary_display, alignment=ft.Alignment(1, 0), expand=True),
-                    ],
-                    expand=True,
-                ),
-            ),
+            standard_display,
+            binary_display,
+            ft.Container(content=memory_indicator, top=2, left=2),
+            ft.Container(content=sign_indicator, top=-3, left=0),
+            ft.Container(content=exponent_row, top=-2, right=1),
         ],
-        alignment=ft.MainAxisAlignment.CENTER,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        spacing=0,
+        width=DISPLAY_CONTENT_WIDTH,
+        height=DISPLAY_CONTENT_HEIGHT,
     )
 
     display_card = ft.Container(
@@ -977,11 +1055,12 @@ def main(page: ft.Page):
 
     def update_display():
         shown_value = state["display_value"] or state["current"] or "0"
+        sign_text, unsigned_value = split_sign_prefix(shown_value)
         if is_base_mode_active():
             base_name = get_active_base_name()
             display_limit = get_base_display_limit(base_name)
-            base_text = shown_value
-            if shown_value != "Error" and len(shown_value) > display_limit:
+            base_text = unsigned_value
+            if shown_value != "Error" and len(unsigned_value) > display_limit:
                 base_text = "Error"
 
             if base_name == "BIN":
@@ -991,17 +1070,25 @@ def main(page: ft.Page):
             else:
                 standard_display.visible = True
                 binary_display.visible = False
-                mantissa_display.value = base_text
-                exponent_display.value = ""
+                grouped_base_text = group_digits_for_display(base_text)
+                mantissa_display.value = grouped_base_text
+                exponent_sign_display.value = ""
+                exponent_digits_display.value = ""
         else:
-            mantissa, exponent = split_display_value(shown_value)
+            mantissa, exponent = split_display_value(unsigned_value)
             if state["editing_exponent"] and "e" not in (state["current"] or "").lower() and state["current"]:
                 exponent = "000"
             standard_display.visible = True
             binary_display.visible = False
-            mantissa_display.value = mantissa
-            exponent_display.value = exponent
-        memory_indicator.visible = state["has_memory"]
+            grouped_mantissa_text = group_digits_for_display(mantissa)
+            mantissa_display.value = grouped_mantissa_text
+            exponent_sign, exponent_digits = split_sign_prefix(exponent)
+            exponent_sign_display.value = exponent_sign
+            exponent_digits_display.value = exponent_digits
+        sign_indicator.value = sign_text
+        sign_indicator.visible = bool(sign_text and shown_value != "Error")
+        memory_indicator.value = "M" if state["has_memory"] else ""
+        memory_indicator.visible = True
         update_bracket_buttons()
         update_memory_buttons()
         update_function_buttons()
@@ -1561,6 +1648,162 @@ def main(page: ft.Page):
             clear()
         elif char == "CE":
             clear_entry()
+
+    class _VirtualControl:
+        def __init__(self, data):
+            self.data = data
+
+    class _VirtualEvent:
+        def __init__(self, data):
+            self.control = _VirtualControl(data)
+
+    def dispatch_button_input(data):
+        on_click(_VirtualEvent(data))
+
+    async def copy_display_to_clipboard():
+        try:
+            await clipboard_service.set(state["display_value"] or state["current"] or "0")
+        except Exception:
+            return
+
+    async def paste_clipboard_to_input():
+        try:
+            clipboard_value = await clipboard_service.get()
+        except Exception:
+            return
+
+        cleaned = str(clipboard_value or "").strip().replace("\u2009", "").replace(" ", "")
+        if not cleaned:
+            return
+
+        try:
+            if is_base_mode_active():
+                parsed = parse_base_integer(cleaned, get_active_base_name())
+                state["current"] = format_base_integer(parsed)
+            else:
+                numeric_value = to_decimal(cleaned)
+                if not numeric_value.is_finite():
+                    return
+                state["current"] = format_number(numeric_value)
+        except (InvalidOperation, ValueError, OverflowError):
+            return
+
+        state["display_value"] = ""
+        state["editing_exponent"] = False
+        state["replace_on_next_input"] = False
+        state["last_was_equals"] = False
+        update_display()
+
+    def on_keyboard(e: ft.KeyboardEvent):
+        # NOTE: this Flet version's KeyboardEvent only exposes
+        # key/shift/ctrl/alt/meta - there is no `code` (physical key) field.
+        key = (e.key or "")
+        key_lower = key.lower()
+        has_shift = bool(getattr(e, "shift", False))
+        has_ctrl = bool(getattr(e, "ctrl", False) or getattr(e, "meta", False))
+
+        if has_ctrl and key_lower == "c":
+            page.run_task(copy_display_to_clipboard)
+            return
+
+        if has_ctrl and key_lower == "v":
+            page.run_task(paste_clipboard_to_input)
+            return
+
+        # Normalize locale-specific key labels that Flet may emit.
+        if key in {"Dead", "dead"}:
+            key = "^"
+            key_lower = "^"
+
+        # On some layouts the +/* key is reported as "=".
+        # Interpret it as + without Shift and * with Shift.
+        if key == "=":
+            key = "*" if has_shift else "+"
+            key_lower = key.lower()
+
+        # Flet may report unshifted key labels for main-row symbol keys.
+        # Handle both US and DE layouts explicitly.
+        if has_shift:
+            shifted_de_map = {
+                "7": "/",
+                "8": "(",
+                "9": ")",
+            }
+            shifted_us_map = {
+                "6": "^",
+                "8": "*",
+                "9": "(",
+                "0": ")",
+            }
+
+            # Prefer DE mappings first (requested behavior), then US fallback.
+            if key in shifted_de_map:
+                key = shifted_de_map[key]
+                key_lower = key.lower()
+            elif key in shifted_us_map:
+                key = shifted_us_map[key]
+                key_lower = key.lower()
+
+        key_map = {
+            "Enter": "=",
+            "Return": "=",
+            "Numpad Enter": "=",
+            "Escape": "AC",
+            "Backspace": "CE",
+            "Delete": "CE",
+            "Add": "+",
+            "Subtract": "-",
+            "Multiply": "*",
+            "Divide": "/",
+            "^": "^",
+            "(": "(",
+            ")": ")",
+            "=": "=",
+            "!": "x!",
+            "l": "log",
+            "L": "log",
+            "n": "ln",
+            "N": "ln",
+            "e": "EXP",
+            "E": "EXP",
+        }
+
+        mapped = key_map.get(key)
+
+        if mapped is None:
+            named_operator_map = {
+                "plus": "+",
+                "minus": "-",
+                "asterisk": "*",
+                "slash": "/",
+                "add": "+",
+                "subtract": "-",
+                "multiply": "*",
+                "divide": "/",
+            }
+            mapped = named_operator_map.get(key_lower)
+
+        if mapped is None and key_lower.startswith("numpad "):
+            numpad_suffix = key_lower[7:]
+            numpad_map = {
+                "enter": "=",
+                "decimal": ".",
+                "add": "+",
+                "subtract": "-",
+                "multiply": "*",
+                "divide": "/",
+                "equal": "=",
+            }
+            if numpad_suffix.isdigit() and len(numpad_suffix) == 1:
+                mapped = numpad_suffix
+            else:
+                mapped = numpad_map.get(numpad_suffix)
+
+        if mapped is None and len(key) == 1 and key in "0123456789.+-*/":
+            mapped = key
+
+        if mapped is not None:
+            dispatch_button_input(mapped)
 
     # --- Mode toggles ---
     mode_rad_label = ft.Text("Rad", size=11, weight=ft.FontWeight.BOLD, no_wrap=True)
@@ -2153,6 +2396,7 @@ def main(page: ft.Page):
     # --- Layout ---
     page.add(safe_area)
     page.on_resize = lambda _: apply_responsive_layout()
+    page.on_keyboard_event = on_keyboard
 
     update_bracket_buttons()
     update_memory_buttons()
