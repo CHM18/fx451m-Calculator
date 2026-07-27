@@ -2,6 +2,8 @@
 fx451m Calculator
 A calculator with basic arithmetic and trigonometric/hyperbolic functions using Flet.
 Works on desktop (Windows/Mac/Linux) and can be built for Android with: flet build apk
+
+By Chris Maier, last update 27.July 2026
 """
 
 import math
