@@ -2381,6 +2381,9 @@ def main(page: ft.Page):
         if is_landscape and is_windows:
             landscape_left_expand = 1
             landscape_right_expand = 1
+        elif is_landscape and is_android:
+            landscape_left_expand = 1
+            landscape_right_expand = 1
         else:
             landscape_left_expand = 5
             landscape_right_expand = 4

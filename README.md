@@ -115,5 +115,6 @@ The APK will appear in `build/apk/`. The first build downloads the Flutter SDK a
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## To Do:
-- write unit tests
+- write more unit tests
 - add financial and statistical functions (extra switch)
+- modern design system (e.g. metal borders, shadows...)
